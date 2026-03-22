@@ -11,12 +11,12 @@ services:
     container_name: ptt-mariadb
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-password}
-      MYSQL_DATABASE: ${DB_DATABASE:-task_tracker}
-      MYSQL_USER: ${DB_USERNAME:-taskuser}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-taskpassword}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD is required - copy .env.local.example to .env}
+      MYSQL_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
+      MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mariadb_data:/var/lib/mysql
     healthcheck:
@@ -31,7 +31,7 @@ services:
     container_name: ptt-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -52,9 +52,9 @@ services:
       PORT: 3000
       DB_HOST: mariadb
       DB_PORT: 3306
-      DB_USERNAME: ${DB_USERNAME:-taskuser}
-      DB_PASSWORD: ${DB_PASSWORD:-taskpassword}
-      DB_DATABASE: ${DB_DATABASE:-task_tracker}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CORS_ORIGIN: http://localhost
@@ -76,7 +76,7 @@ services:
     container_name: ptt-frontend
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost
+      NEXT_PUBLIC_API_URL: http://localhost/tasks
     ports:
       - "3001:3001"
     depends_on:
