@@ -6,21 +6,23 @@ server {
     listen 80;
     server_name localhost;
 
-    # API requests → remote API EC2 (cross-region proxy)
+    # API requests → API CloudFront (cross-region proxy)
     location /api/docs {
-        proxy_pass http://${API_HOST}:3000/api/docs;
-        proxy_set_header Host $host;
+        proxy_pass https://${API_HOST}/api/docs;
+        proxy_set_header Host ${API_HOST};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_ssl_server_name on;
     }
 
     location /tasks {
-        proxy_pass http://${API_HOST}:3000/tasks;
-        proxy_set_header Host $host;
+        proxy_pass https://${API_HOST}/tasks;
+        proxy_set_header Host ${API_HOST};
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_ssl_server_name on;
     }
 
     # Frontend (catch-all)
