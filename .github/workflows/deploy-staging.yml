@@ -1,17 +1,13 @@
 # ============================================
-# Production: Manual Deploy (Multi-Region)
+# Staging: Auto-Deploy on Push (Multi-Region)
 # ============================================
 # API → ap-southeast-1, Frontend → us-east-1
 
-name: Deploy to Production
+name: Deploy to Staging
 
 on:
-  workflow_dispatch:
-    inputs:
-      confirm:
-        description: 'Type "deploy" to confirm production deployment'
-        required: true
-        type: string
+  push:
+    branches: [staging]
 
 env:
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -21,24 +17,12 @@ env:
   ECR_FRONTEND_REPO: ptt-frontend
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Validate confirmation
-        if: github.event.inputs.confirm != 'deploy'
-        run: |
-          echo "Deployment not confirmed. Please type 'deploy' to proceed."
-          exit 1
-
   build-and-deploy:
-    needs: validate
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Docker Repo
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Checkout API Source
         uses: actions/checkout@v4
@@ -92,45 +76,43 @@ jobs:
       - name: Build & Push API Image
         run: |
           cd personal-task-tracker-api
-          docker build -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.API_REGION }}.amazonaws.com/${{ env.ECR_API_REPO }}:production .
-          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.API_REGION }}.amazonaws.com/${{ env.ECR_API_REPO }}:production
+          docker build -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.API_REGION }}.amazonaws.com/${{ env.ECR_API_REPO }}:staging .
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.API_REGION }}.amazonaws.com/${{ env.ECR_API_REPO }}:staging
 
       - name: Build & Push Frontend Image
         run: |
           cd personal-task-tracker-frontend
           docker build \
-            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PRODUCTION_API_URL }} \
-            -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.FRONTEND_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:production .
-          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.FRONTEND_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:production
+            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.STAGING_API_URL }} \
+            -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.FRONTEND_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:staging .
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.FRONTEND_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:staging
 
       - name: Deploy API to ap-southeast-1
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.PRODUCTION_API_EC2_HOST }}
+          host: ${{ secrets.STAGING_API_EC2_HOST }}
           username: ec2-user
-          key: ${{ secrets.PRODUCTION_EC2_SSH_KEY }}
+          key: ${{ secrets.STAGING_EC2_SSH_KEY }}
           script: |
             cd /home/ec2-user/personal-task-tracker
 
             aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com
 
-            docker compose -f docker-compose.api-production.yml pull
-            docker compose -f docker-compose.api-production.yml up -d --remove-orphans
+            docker compose -f docker-compose.api-staging.yml pull
+            docker compose -f docker-compose.api-staging.yml up -d --remove-orphans
             docker image prune -f || true
 
       - name: Deploy Frontend to us-east-1
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.PRODUCTION_FRONTEND_EC2_HOST }}
+          host: ${{ secrets.STAGING_FRONTEND_EC2_HOST }}
           username: ec2-user
-          key: ${{ secrets.PRODUCTION_EC2_SSH_KEY }}
+          key: ${{ secrets.STAGING_EC2_SSH_KEY }}
           script: |
             cd /home/ec2-user/personal-task-tracker
 
             aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
 
-            docker compose -f docker-compose.frontend-production.yml pull
-            docker compose -f docker-compose.frontend-production.yml up -d --remove-orphans
+            docker compose -f docker-compose.frontend-staging.yml pull
+            docker compose -f docker-compose.frontend-staging.yml up -d --remove-orphans
             docker image prune -f || true
-
-            echo "Production deployment complete!"

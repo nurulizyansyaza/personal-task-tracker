@@ -1,0 +1,48 @@
+# ============================================
+# API Production - ap-southeast-1
+# ============================================
+# API + Redis only (split from frontend)
+# Differences from staging:
+#   - container names use "-production" suffix
+#   - ECR image tag is "production"
+#   - NODE_ENV is "production"
+#   - Redis has persistence (appendonly) and memory limits
+# ============================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: ptt-redis-production
+    restart: always
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-southeast-1.amazonaws.com/ptt-api:production
+    container_name: ptt-api-production
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: ${DB_HOST:?DB_HOST required}
+      DB_PORT: 3306
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE required}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN required}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:

@@ -1,0 +1,47 @@
+# ============================================
+# API Staging - ap-southeast-1
+# ============================================
+# API + Redis only (split from frontend)
+# Differences from production:
+#   - container names use "-staging" suffix
+#   - ECR image tag is "staging"
+#   - NODE_ENV is "staging"
+#   - Redis uses default config (no persistence/memory limits)
+# ============================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: ptt-redis-staging
+    restart: always
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-southeast-1.amazonaws.com/ptt-api:staging
+    container_name: ptt-api-staging
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: staging
+      PORT: 3000
+      DB_HOST: ${DB_HOST:?DB_HOST required}
+      DB_PORT: 3306
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE required}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN required}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:
