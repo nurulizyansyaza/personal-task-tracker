@@ -190,7 +190,7 @@ See the [AWS Infrastructure doc](./AWS-INFRASTRUCTURE.md#github-secrets-required
 - Use ECS Fargate for container orchestration instead of bare EC2
 - Add ElastiCache for Redis instead of Docker-hosted Redis
 - Implement blue-green or rolling deployments
-- Add comprehensive E2E tests with Playwright
+- Add comprehensive end to end tests with Playwright
 - Set up CloudWatch dashboards and SNS alerting
 - Add database migration scripts (TypeORM migrations instead of synchronize)
 - Add Terraform/CDK for infrastructure-as-code
