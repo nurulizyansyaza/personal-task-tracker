@@ -2,251 +2,327 @@
 
 ## Architecture Overview
 
-Both **staging** and **production** environments use identical architecture:
+This project uses a **multi-region** deployment with CloudFront CDN:
 
+- **API** → `ap-southeast-1` (Singapore) — close to RDS database
+- **Frontend** → `us-east-1` (N. Virginia) — optimized for CloudFront
+- **CloudFront** → Global CDN providing HTTPS, caching, and DDoS protection
+
+```mermaid
+graph TB
+    subgraph "CloudFront CDN (Global Edge)"
+        CF_FE["Frontend CloudFront<br/>HTTPS + Cache"]
+        CF_API["API CloudFront<br/>HTTPS + Pass-through"]
+    end
+
+    subgraph "us-east-1 (N. Virginia)"
+        subgraph "Frontend EC2 (t3.micro)"
+            FE_NGINX["Nginx :80"]
+            FE_APP["Next.js :3001"]
+        end
+        FE_SG["Security Group<br/>80 → CloudFront only<br/>22 → SSH"]
+    end
+
+    subgraph "ap-southeast-1 (Singapore)"
+        subgraph "API EC2 (t3.micro)"
+            API_APP["NestJS :3000"]
+            API_REDIS["Redis :6379"]
+        end
+        API_SG["Security Group<br/>3000 → CloudFront only<br/>22 → SSH"]
+        RDS["RDS MariaDB 10.11<br/>db.t3.micro<br/>task_tracker_staging<br/>task_tracker_production"]
+        RDS_SG["Security Group<br/>3306 → API SG only"]
+    end
+
+    CF_FE -->|"Locked via prefix list"| FE_SG --> FE_NGINX --> FE_APP
+    FE_NGINX -->|"/tasks, /api/docs"| CF_API
+    CF_API -->|"Locked via prefix list"| API_SG --> API_APP
+    API_APP --> API_REDIS
+    API_APP --> RDS
+    RDS_SG --> RDS
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        AWS VPC                               │
-│                   CIDR: 10.0.0.0/16                         │
-│                                                              │
-│  ┌──────────────────────────┐  ┌──────────────────────────┐ │
-│  │    Public Subnet          │  │    Private Subnet         │ │
-│  │    10.0.1.0/24           │  │    10.0.2.0/24           │ │
-│  │                          │  │                          │ │
-│  │  ┌────────────────────┐  │  │  ┌────────────────────┐  │ │
-│  │  │   EC2 t2.micro     │  │  │  │   RDS db.t3.micro  │  │ │
-│  │  │                    │  │  │  │   MariaDB           │  │ │
-│  │  │  ┌──────────────┐  │  │  │  │                    │  │ │
-│  │  │  │   Docker      │  │  │  │  │  staging_db       │  │ │
-│  │  │  │  ┌─────────┐  │  │  │  │  │  production_db   │  │ │
-│  │  │  │  │ Nginx   │  │  │  │  │  └────────────────────┘  │ │
-│  │  │  │  │ API     │  │  │  │  │                          │ │
-│  │  │  │  │ Frontend│  │  │  └──────────────────────────┘ │
-│  │  │  │  │ Redis   │  │  │                                │
-│  │  │  │  └─────────┘  │  │                                │
-│  │  │  └──────────────┘  │  │                                │
-│  │  └────────────────────┘  │                                │
-│  │                          │                                │
-│  └──────────────────────────┘                                │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+
+## Request Flow
+
+```mermaid
+sequenceDiagram
+    participant User as Browser
+    participant CF_FE as CloudFront (Frontend)
+    participant NGINX as Nginx (us-east-1)
+    participant NextJS as Next.js
+    participant CF_API as CloudFront (API)
+    participant API as NestJS (ap-southeast-1)
+    participant DB as RDS MariaDB
+
+    User->>CF_FE: GET https://frontend.cloudfront.net/
+    CF_FE->>NGINX: Forward to EC2 :80
+    NGINX->>NextJS: Proxy to :3001
+    NextJS-->>User: HTML page
+
+    User->>CF_FE: GET /tasks (via browser JS)
+    CF_FE->>NGINX: Forward to EC2 :80
+    NGINX->>CF_API: Proxy to API CloudFront (https)
+    CF_API->>API: Forward to EC2 :3000
+    API->>DB: SELECT * FROM tasks
+    DB-->>API: Results
+    API-->>User: JSON response
 ```
 
-## AWS Free Tier Resources Used
+## AWS Resources
 
-| Service | Tier | Free Tier Limit | Usage |
-|---------|------|----------------|-------|
-| **EC2** | t2.micro | 750 hrs/month (12 months) | 1 instance per environment |
-| **RDS** | db.t3.micro | 750 hrs/month (12 months), 20GB | 1 instance, separate DBs |
-| **ECR** | - | 500MB storage (always free) | Docker image registry |
-| **CloudWatch** | - | 10 metrics, 10 alarms (always free) | Basic monitoring |
-| **VPC** | - | Free | Networking |
-| **Elastic IP** | - | Free when attached to running instance | 1 per EC2 |
-| **S3** | - | 5GB (12 months) | Optional: backups |
+### Compute & Networking
 
-### ⚠️ Cost Optimization Notes
-- **EC2**: 750 hours covers 1 instance 24/7. For 2 environments, consider stopping staging when not in use.
-- **RDS**: Share 1 RDS instance with separate databases for staging and production to stay within free tier.
-- **Elastic IP**: Free only when associated with a running instance. Release when EC2 is stopped.
+| Resource | Region | Details |
+|----------|--------|---------|
+| EC2 API Staging | ap-southeast-1 | t3.micro, EIP: 13.229.192.200 |
+| EC2 API Production | ap-southeast-1 | t3.micro, EIP: 13.214.79.66 |
+| EC2 Frontend Staging | us-east-1 | t3.micro, EIP: 98.90.70.226 |
+| EC2 Frontend Production | us-east-1 | t3.micro, EIP: 13.222.71.108 |
+| RDS MariaDB | ap-southeast-1 | db.t3.micro, 10.11, 20GB gp2 |
+| ECR ptt-api | ap-southeast-1 | API Docker images |
+| ECR ptt-frontend | us-east-1 | Frontend Docker images |
+
+### CloudFront Distributions
+
+| Distribution | Domain | Origin |
+|-------------|--------|--------|
+| API Staging (E1ZNNY4LBTHMIF) | diofa9vowlzj6.cloudfront.net | API Staging EC2 :3000 |
+| API Production (E1H0JVZQI5FCZG) | d270j9db8ffegc.cloudfront.net | API Production EC2 :3000 |
+| Frontend Staging (E1NQFJER93057G) | d179mmtd1r518i.cloudfront.net | Frontend Staging EC2 :80 |
+| Frontend Production (EEFTGCVP1R1HH) | d1w6dngwkrqpvq.cloudfront.net | Frontend Production EC2 :80 |
+
+### Security Groups
+
+| Group | Region | Rules |
+|-------|--------|-------|
+| ptt-api-sg | ap-southeast-1 | Port 3000: CloudFront prefix list only, Port 22: SSH |
+| ptt-frontend-sg | us-east-1 | Port 80: CloudFront prefix list only, Port 22: SSH |
+| ptt-rds-sg | ap-southeast-1 | Port 3306: API security group only |
+
+> **Note**: EC2 ports are locked to CloudFront managed prefix lists (`pl-31a34658` for ap-southeast-1, `pl-3b927c52` for us-east-1). Direct IP access is blocked.
 
 ## Step-by-Step Setup
 
-### 1. VPC Setup
+### 1. EC2 Key Pair
 
 ```bash
-# Create VPC
-aws ec2 create-vpc --cidr-block 10.0.0.0/16 --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=ptt-vpc}]'
-
-# Create Public Subnet
-aws ec2 create-subnet --vpc-id <vpc-id> --cidr-block 10.0.1.0/24 --availability-zone ap-southeast-1a --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=ptt-public}]'
-
-# Create Private Subnet
-aws ec2 create-subnet --vpc-id <vpc-id> --cidr-block 10.0.2.0/24 --availability-zone ap-southeast-1a --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=ptt-private}]'
-
-# Create Internet Gateway
-aws ec2 create-internet-gateway --tag-specifications 'ResourceType=internet-gateway,Tags=[{Key=Name,Value=ptt-igw}]'
-aws ec2 attach-internet-gateway --internet-gateway-id <igw-id> --vpc-id <vpc-id>
-
-# Create Route Table for Public Subnet
-aws ec2 create-route-table --vpc-id <vpc-id> --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=ptt-public-rt}]'
-aws ec2 create-route --route-table-id <rt-id> --destination-cidr-block 0.0.0.0/0 --gateway-id <igw-id>
-aws ec2 associate-route-table --route-table-id <rt-id> --subnet-id <public-subnet-id>
+aws ec2 create-key-pair \
+  --key-name personal-task-tracker-deploy \
+  --query 'KeyMaterial' --output text > personal-task-tracker-deploy.pem
+chmod 400 personal-task-tracker-deploy.pem
 ```
 
 ### 2. Security Groups
 
 ```bash
-# EC2 Security Group
-aws ec2 create-security-group --group-name ptt-ec2-sg --description "EC2 for Task Tracker" --vpc-id <vpc-id>
+# API Security Group (ap-southeast-1)
+aws ec2 create-security-group --group-name ptt-api-sg \
+  --description "API for Task Tracker" --vpc-id <vpc-id> --region ap-southeast-1
 
-# Allow SSH (restrict to your IP in production)
-aws ec2 authorize-security-group-ingress --group-id <sg-id> --protocol tcp --port 22 --cidr 0.0.0.0/0
+# Allow SSH
+aws ec2 authorize-security-group-ingress --group-id <sg-id> \
+  --protocol tcp --port 22 --cidr 0.0.0.0/0
 
-# Allow HTTP
-aws ec2 authorize-security-group-ingress --group-id <sg-id> --protocol tcp --port 80 --cidr 0.0.0.0/0
+# Allow port 3000 from CloudFront only (managed prefix list)
+aws ec2 authorize-security-group-ingress --group-id <sg-id> \
+  --ip-permissions "IpProtocol=tcp,FromPort=3000,ToPort=3000,PrefixListIds=[{PrefixListId=pl-31a34658}]"
 
-# Allow HTTPS (for future SSL)
-aws ec2 authorize-security-group-ingress --group-id <sg-id> --protocol tcp --port 443 --cidr 0.0.0.0/0
+# Frontend Security Group (us-east-1)
+aws ec2 create-security-group --group-name ptt-frontend-sg \
+  --description "Frontend for Task Tracker" --vpc-id <vpc-id> --region us-east-1
 
-# RDS Security Group
-aws ec2 create-security-group --group-name ptt-rds-sg --description "RDS for Task Tracker" --vpc-id <vpc-id>
+# Allow port 80 from CloudFront only
+aws ec2 authorize-security-group-ingress --group-id <sg-id> \
+  --ip-permissions "IpProtocol=tcp,FromPort=80,ToPort=80,PrefixListIds=[{PrefixListId=pl-3b927c52}]"
 
-# Allow MariaDB from EC2 SG only
-aws ec2 authorize-security-group-ingress --group-id <rds-sg-id> --protocol tcp --port 3306 --source-group <ec2-sg-id>
+# RDS Security Group (ap-southeast-1)
+aws ec2 create-security-group --group-name ptt-rds-sg \
+  --description "RDS for Task Tracker" --vpc-id <vpc-id> --region ap-southeast-1
+
+# Allow MariaDB from API SG only
+aws ec2 authorize-security-group-ingress --group-id <rds-sg-id> \
+  --protocol tcp --port 3306 --source-group <api-sg-id>
 ```
 
 ### 3. RDS MariaDB
 
 ```bash
-# Create DB Subnet Group
-aws rds create-db-subnet-group \
-  --db-subnet-group-name ptt-db-subnet \
-  --db-subnet-group-description "Task Tracker DB Subnet" \
-  --subnet-ids <private-subnet-id-1> <private-subnet-id-2>
-
-# Create RDS Instance (Free Tier)
 aws rds create-db-instance \
   --db-instance-identifier ptt-mariadb \
   --db-instance-class db.t3.micro \
   --engine mariadb \
-  --engine-version "11.4" \
+  --engine-version "10.11" \
   --master-username admin \
   --master-user-password <your-secure-password> \
   --allocated-storage 20 \
   --storage-type gp2 \
   --vpc-security-group-ids <rds-sg-id> \
-  --db-subnet-group-name ptt-db-subnet \
   --no-publicly-accessible \
   --backup-retention-period 7 \
   --no-multi-az
 ```
 
-After RDS is available, create separate databases:
+After RDS is available, create databases:
 ```sql
 CREATE DATABASE task_tracker_staging;
 CREATE DATABASE task_tracker_production;
+CREATE USER 'taskuser'@'%' IDENTIFIED BY '<secure-password>';
+GRANT ALL PRIVILEGES ON task_tracker_staging.* TO 'taskuser'@'%';
+GRANT ALL PRIVILEGES ON task_tracker_production.* TO 'taskuser'@'%';
+FLUSH PRIVILEGES;
 ```
 
 ### 4. ECR Repositories
 
 ```bash
-# Create API ECR repo
-aws ecr create-repository --repository-name ptt-api --image-scanning-configuration scanOnPush=true
+# API ECR (ap-southeast-1)
+aws ecr create-repository --repository-name ptt-api --region ap-southeast-1
 
-# Create Frontend ECR repo
-aws ecr create-repository --repository-name ptt-frontend --image-scanning-configuration scanOnPush=true
+# Frontend ECR (us-east-1)
+aws ecr create-repository --repository-name ptt-frontend --region us-east-1
 ```
 
-### 5. EC2 Instance
+### 5. EC2 Instances
 
 ```bash
-# Launch EC2 (Amazon Linux 2023, t2.micro)
-aws ec2 run-instances \
-  --image-id ami-0c55b159cbfafe1f0 \
-  --instance-type t2.micro \
-  --key-name <your-key-pair> \
-  --security-group-ids <ec2-sg-id> \
-  --subnet-id <public-subnet-id> \
-  --associate-public-ip-address \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=ptt-staging}]'
+# Launch EC2 instances (Amazon Linux 2023, t3.micro)
+# API instances in ap-southeast-1, Frontend instances in us-east-1
 
-# Allocate and Associate Elastic IP
+aws ec2 run-instances \
+  --image-id <ami-id> \
+  --instance-type t3.micro \
+  --key-name personal-task-tracker-deploy \
+  --security-group-ids <sg-id> \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=ptt-api-staging}]'
+
+# Allocate and associate Elastic IPs
 aws ec2 allocate-address --domain vpc
 aws ec2 associate-address --instance-id <instance-id> --allocation-id <eip-alloc-id>
 ```
 
-Then SSH in and run the setup script:
+Install Docker on each EC2:
 ```bash
-scp scripts/setup-ec2.sh ec2-user@<ip>:/home/ec2-user/
-ssh ec2-user@<ip>
-chmod +x setup-ec2.sh && ./setup-ec2.sh
+sudo yum update -y
+sudo yum install -y docker
+sudo systemctl enable docker && sudo systemctl start docker
+sudo usermod -aG docker ec2-user
+
+# Install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+  -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+
+# Configure AWS CLI for ECR login
+aws configure
 ```
 
-### 6. CloudWatch Monitoring
+### 6. CloudFront Distributions
 
 ```bash
-# Enable detailed monitoring
-aws ec2 monitor-instances --instance-ids <instance-id>
+# API CloudFront (caching disabled, all HTTP methods allowed)
+aws cloudfront create-distribution \
+  --origin-domain-name <api-ec2-public-dns> \
+  --default-cache-behavior '{
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": ["GET","HEAD","OPTIONS","PUT","PATCH","POST","DELETE"],
+    "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+    "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3"
+  }'
 
-# Create CPU Alarm
-aws cloudwatch put-metric-alarm \
-  --alarm-name ptt-cpu-high \
-  --alarm-description "CPU > 80% for 5 min" \
-  --metric-name CPUUtilization \
-  --namespace AWS/EC2 \
-  --statistic Average \
-  --period 300 \
-  --threshold 80 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 1 \
-  --dimensions Name=InstanceId,Value=<instance-id>
+# Frontend CloudFront (standard caching)
+aws cloudfront create-distribution \
+  --origin-domain-name <frontend-ec2-public-dns> \
+  --default-cache-behavior '{
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": ["GET","HEAD"],
+    "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }'
+```
 
-# Create RDS connection alarm
-aws cloudwatch put-metric-alarm \
-  --alarm-name ptt-rds-connections \
-  --alarm-description "RDS connections > 50" \
-  --metric-name DatabaseConnections \
-  --namespace AWS/RDS \
-  --statistic Average \
-  --period 300 \
-  --threshold 50 \
-  --comparison-operator GreaterThanThreshold \
-  --evaluation-periods 1 \
-  --dimensions Name=DBInstanceIdentifier,Value=ptt-mariadb
+> **Important**: CloudFront origins must use EC2 public DNS names (not IPs).
+> - ap-southeast-1: `ec2-{ip}.ap-southeast-1.compute.amazonaws.com`
+> - us-east-1: `ec2-{ip}.compute-1.amazonaws.com`
+
+### 7. EC2 Environment Files
+
+Deploy `.env` files to each EC2:
+
+**API EC2** (`/home/ec2-user/personal-task-tracker/.env`):
+```env
+AWS_ACCOUNT_ID=<account-id>
+DB_HOST=<rds-endpoint>
+DB_USERNAME=taskuser
+DB_PASSWORD=<secure-password>
+DB_DATABASE=task_tracker_staging
+CORS_ORIGIN=https://<frontend-cloudfront-domain>
+```
+
+**Frontend EC2** (`/home/ec2-user/personal-task-tracker/.env`):
+```env
+AWS_ACCOUNT_ID=<account-id>
+NEXT_PUBLIC_API_URL=https://<frontend-cloudfront-domain>
+API_HOST=<api-cloudfront-domain>
 ```
 
 ## GitHub Secrets Required
 
-Set these in each repository's Settings → Secrets:
+### Sub-repos (API, Frontend, Core)
 
-### Sub-repos (api, core, frontend)
 | Secret | Description |
 |--------|-------------|
-| `DOCKER_REPO_PAT` | GitHub Personal Access Token with repo access to docker repo |
+| `DOCKER_REPO_PAT` | GitHub PAT with repo access to push to orchestration repo |
 
-### Docker repo (personal-task-tracker)
+### Orchestration Repo (personal-task-tracker)
+
 | Secret | Description |
 |--------|-------------|
-| `DOCKER_REPO_PAT` | GitHub PAT for checking out sub-repos |
 | `AWS_ACCESS_KEY_ID` | AWS IAM access key |
 | `AWS_SECRET_ACCESS_KEY` | AWS IAM secret key |
-| `AWS_REGION` | e.g., `ap-southeast-1` |
 | `AWS_ACCOUNT_ID` | 12-digit AWS account ID |
-| `STAGING_EC2_HOST` | Staging EC2 public IP/domain |
-| `STAGING_EC2_SSH_KEY` | SSH private key for staging EC2 |
-| `STAGING_API_URL` | e.g., `http://staging.yourdomain.com` |
-| `PRODUCTION_EC2_HOST` | Production EC2 public IP/domain |
-| `PRODUCTION_EC2_SSH_KEY` | SSH private key for production EC2 |
-| `PRODUCTION_API_URL` | e.g., `http://yourdomain.com` |
+| `STAGING_API_EC2_HOST` | Staging API EC2 Elastic IP |
+| `STAGING_FRONTEND_EC2_HOST` | Staging Frontend EC2 Elastic IP |
+| `STAGING_EC2_SSH_KEY` | SSH private key (.pem content) |
+| `STAGING_API_URL` | Staging Frontend CloudFront URL |
+| `PRODUCTION_API_EC2_HOST` | Production API EC2 Elastic IP |
+| `PRODUCTION_FRONTEND_EC2_HOST` | Production Frontend EC2 Elastic IP |
+| `PRODUCTION_EC2_SSH_KEY` | SSH private key (.pem content) |
+| `PRODUCTION_API_URL` | Production Frontend CloudFront URL |
 
-## CI/CD Flow Diagram
+> **Note**: `STAGING_API_URL` and `PRODUCTION_API_URL` are the **Frontend CloudFront domains** (not the API CloudFront). `NEXT_PUBLIC_API_URL` is baked into the Next.js build — the browser makes requests to the same origin, and Nginx proxies `/tasks` to the API CloudFront.
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  API Repo   │     │  Core Repo  │     │ Frontend Repo│
-│  (main)     │     │  (main)     │     │  (main)      │
-└──────┬──────┘     └──────┬──────┘     └──────┬───────┘
-       │                   │                    │
-       │    Push to main triggers CI            │
-       ▼                   ▼                    ▼
-  ┌──────────────────────────────────────────────────┐
-  │         GitHub Actions: Build & Test              │
-  └──────────────────────────────────┬───────────────┘
-                                     │
-                        Sync to Docker Repo
-                                     │
-              ┌──────────────────────┴────────────────────┐
-              ▼                                           ▼
-    ┌─────────────────┐                        ┌─────────────────┐
-    │  Docker Repo    │                        │  Docker Repo    │
-    │  (staging)      │                        │  (main)         │
-    └────────┬────────┘                        └────────┬────────┘
-             │                                          │
-        Auto Deploy                              Manual Deploy
-             │                                    (workflow_dispatch)
-             ▼                                          ▼
-    ┌─────────────────┐                        ┌─────────────────┐
-    │  AWS Staging    │                        │  AWS Production │
-    │  EC2 + RDS      │                        │  EC2 + RDS      │
-    └─────────────────┘                        └─────────────────┘
+## CI/CD Flow
+
+```mermaid
+flowchart LR
+    subgraph "Sub-repos"
+        API["API Repo<br/>(main)"]
+        FE["Frontend Repo<br/>(main)"]
+        CORE["Core Repo<br/>(main)"]
+    end
+
+    subgraph "Orchestration Repo"
+        STAGING["staging branch"]
+        MAIN["main branch"]
+    end
+
+    subgraph "GitHub Actions"
+        BUILD_S["Build & Push<br/>Docker Images"]
+        BUILD_P["Build & Push<br/>Docker Images"]
+    end
+
+    subgraph "AWS (Staging)"
+        ECR_S["ECR :staging"]
+        EC2_S["EC2 Staging<br/>(API + Frontend)"]
+    end
+
+    subgraph "AWS (Production)"
+        ECR_P["ECR :production"]
+        EC2_P["EC2 Production<br/>(API + Frontend)"]
+    end
+
+    API & FE & CORE -->|"sync push"| STAGING & MAIN
+    STAGING -->|"auto trigger"| BUILD_S
+    MAIN -->|"manual trigger"| BUILD_P
+    BUILD_S --> ECR_S --> EC2_S
+    BUILD_P --> ECR_P --> EC2_P
 ```
