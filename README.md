@@ -5,7 +5,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![AWS](https://img.shields.io/badge/AWS-EC2%20%7C%20RDS%20%7C%20CloudFront-FF9900?logo=amazon-web-services&logoColor=white)
-![Tests](https://img.shields.io/badge/Tests-209%20passing-brightgreen?logo=jest&logoColor=white)
+![Tests](https://img.shields.io/badge/Tests-211%20passing-brightgreen?logo=jest&logoColor=white)
 
 A full-stack **Kanban task management application** built with NestJS, Next.js, and TypeScript. Drag and drop tasks between columns, mark them done with a checkbox, sort by date or status, and keep working offline — all deployed on AWS with automated CI/CD.
 
@@ -288,13 +288,13 @@ npm run dev
 
 ## Testing
 
-The project has **209 tests** across all 3 code repositories:
+The project has **211 tests** across all 3 code repositories:
 
 | Repository | Tests | What's Tested |
 |---|---|---|
 | `personal-task-tracker-core` | 41 | Error classes, validation rules, constants, type exports |
 | `personal-task-tracker-api` | 74 (64 unit + 10 integration) | Controllers, services, DTOs, entities, config, filters, interceptors |
-| `personal-task-tracker-frontend` | 94 | API client, localStorage fallback, hooks (sort, modal, delete), Kanban components (card, column, modal, skeleton) |
+| `personal-task-tracker-frontend` | 96 | API client, localStorage fallback, hooks (sort, modal, delete), Kanban components (card, column, modal, skeleton) |
 
 ### How to Run Tests
 
@@ -311,7 +311,7 @@ npm test # Run all unit tests
 npm run test:ptt-tomei # Run integration tests
 npm run test:cov # Run with coverage report
 
-# Frontend tests (94 tests)
+# Frontend tests (96 tests)
 cd personal-task-tracker-frontend
 npm test # Run all tests
 npm run test:cov # Run with coverage report
@@ -760,4 +760,4 @@ See `.env.frontend.example` for the template:
 | [personal-task-tracker](https://github.com/nurulizyansyaza/personal-task-tracker) | Orchestration — CI/CD, Docker, AWS infra | — |
 | [personal-task-tracker-core](https://github.com/nurulizyansyaza/personal-task-tracker-core) | Shared TypeScript library — types, validation, errors | 41 |
 | [personal-task-tracker-api](https://github.com/nurulizyansyaza/personal-task-tracker-api) | NestJS REST API with security middleware | 74 |
-| [personal-task-tracker-frontend](https://github.com/nurulizyansyaza/personal-task-tracker-frontend) | Next.js Kanban dashboard | 94 |
+| [personal-task-tracker-frontend](https://github.com/nurulizyansyaza/personal-task-tracker-frontend) | Next.js Kanban dashboard | 96 |
