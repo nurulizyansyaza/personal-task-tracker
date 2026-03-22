@@ -65,6 +65,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.API_REGION }}
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build core & prepare Docker contexts
+        run: |
+          cd personal-task-tracker-core
+          npm ci
+          npm run build
+
+          # Copy built core into API and Frontend Docker contexts
+          cp -r ../personal-task-tracker-core ../personal-task-tracker-api/personal-task-tracker-core
+          cp -r ../personal-task-tracker-core ../personal-task-tracker-frontend/personal-task-tracker-core
+
+          # Update file: references to point to local copy
+          sed -i 's|file:../personal-task-tracker-core|file:./personal-task-tracker-core|' ../personal-task-tracker-api/package.json
+          sed -i 's|file:../personal-task-tracker-core|file:./personal-task-tracker-core|' ../personal-task-tracker-frontend/package.json
+
       - name: Login to ECR (both regions)
         run: |
           aws ecr get-login-password --region ${{ env.API_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.API_REGION }}.amazonaws.com
