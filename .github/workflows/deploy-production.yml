@@ -1,0 +1,109 @@
+# ============================================
+# Production: Manual Deploy
+# ============================================
+# Triggered manually via workflow_dispatch
+# Builds Docker images, pushes to ECR, deploys to EC2
+
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm production deployment'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_API_REPO: ptt-api
+  ECR_FRONTEND_REPO: ptt-frontend
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        if: github.event.inputs.confirm != 'deploy'
+        run: |
+          echo "Deployment not confirmed. Please type 'deploy' to proceed."
+          exit 1
+
+  build-and-deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Docker Repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Checkout API Source
+        uses: actions/checkout@v4
+        with:
+          repository: nurulizyansyaza/personal-task-tracker-api
+          token: ${{ secrets.DOCKER_REPO_PAT }}
+          path: personal-task-tracker-api
+
+      - name: Checkout Core Source
+        uses: actions/checkout@v4
+        with:
+          repository: nurulizyansyaza/personal-task-tracker-core
+          token: ${{ secrets.DOCKER_REPO_PAT }}
+          path: personal-task-tracker-core
+
+      - name: Checkout Frontend Source
+        uses: actions/checkout@v4
+        with:
+          repository: nurulizyansyaza/personal-task-tracker-frontend
+          token: ${{ secrets.DOCKER_REPO_PAT }}
+          path: personal-task-tracker-frontend
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push API Image
+        run: |
+          cd personal-task-tracker-api
+          docker build -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_API_REPO }}:production .
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_API_REPO }}:production
+
+      - name: Build & Push Frontend Image
+        run: |
+          cd personal-task-tracker-frontend
+          docker build \
+            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PRODUCTION_API_URL }} \
+            -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:production .
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:production
+
+      - name: Deploy to Production EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.PRODUCTION_EC2_SSH_KEY }}
+          script: |
+            cd /home/ec2-user/personal-task-tracker
+
+            # Login to ECR
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+
+            # Pull latest images
+            docker compose -f docker-compose.production.yml pull
+
+            # Restart services with zero downtime
+            docker compose -f docker-compose.production.yml up -d --remove-orphans
+
+            # Cleanup old images
+            docker image prune -f
+
+            echo "✅ Production deployment complete!"
