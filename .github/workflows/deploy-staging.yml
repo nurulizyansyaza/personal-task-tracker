@@ -100,7 +100,7 @@ jobs:
 
             docker compose -f docker-compose.api-staging.yml pull
             docker compose -f docker-compose.api-staging.yml up -d --remove-orphans
-            docker image prune -f
+            docker image prune -f || true
 
       - name: Deploy Frontend to us-east-1
         uses: appleboy/ssh-action@v1
@@ -115,4 +115,4 @@ jobs:
 
             docker compose -f docker-compose.frontend-staging.yml pull
             docker compose -f docker-compose.frontend-staging.yml up -d --remove-orphans
-            docker image prune -f
+            docker image prune -f || true
