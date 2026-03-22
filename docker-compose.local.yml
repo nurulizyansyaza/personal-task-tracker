@@ -16,7 +16,7 @@ services:
       MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is required}
       MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     ports:
-      - "127.0.0.1:3306:3306"
+      - "127.0.0.1:3307:3306"
     volumes:
       - mariadb_data:/var/lib/mysql
     healthcheck:
@@ -31,7 +31,7 @@ services:
     container_name: ptt-redis
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -57,9 +57,9 @@ services:
       DB_DATABASE: ${DB_DATABASE:?DB_DATABASE is required}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      CORS_ORIGIN: http://localhost
+      CORS_ORIGIN: http://localhost:8080
     ports:
-      - "3000:3000"
+      - "3100:3000"
     depends_on:
       mariadb:
         condition: service_healthy
@@ -72,13 +72,13 @@ services:
       context: ../personal-task-tracker-frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost/tasks
+        - NEXT_PUBLIC_API_URL=http://localhost:8080/tasks
     container_name: ptt-frontend
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost/tasks
+      NEXT_PUBLIC_API_URL: http://localhost:8080/tasks
     ports:
-      - "3001:3001"
+      - "3101:3001"
     depends_on:
       - api
 
@@ -88,7 +88,7 @@ services:
     container_name: ptt-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "8080:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:

@@ -165,50 +165,48 @@ git clone https://github.com/nurulizyansyaza/personal-task-tracker-api.git
 git clone https://github.com/nurulizyansyaza/personal-task-tracker-frontend.git
 ```
 
-**Step 2: Build the core package**
+**Step 2: Start everything with the helper script**
 
-The API and Frontend both depend on this shared package, so build it first:
-
-```bash
-cd personal-task-tracker-core
-npm install
-npm run build
-cd ..
-```
-
-**Step 3: Install dependencies for API and Frontend**
-
-```bash
-cd personal-task-tracker-api && npm install && cd ..
-cd personal-task-tracker-frontend && npm install && cd ..
-```
-
-**Step 4: Start everything with Docker Compose**
+The helper script builds the core package, prepares Docker build contexts, and starts all services:
 
 ```bash
 cd personal-task-tracker
-cp .env.local.example .env
-docker compose -f docker-compose.local.yml up --build
+./scripts/local-docker.sh up
 ```
 
-This starts **5 containers**:
-| Container | Port | What It Does |
-|---|---|---|
-| MariaDB | 3306 | Database |
-| Redis | 6379 | Cache |
-| NestJS API | 3000 | Backend REST API |
-| Next.js Frontend | 3001 | Kanban dashboard |
-| Nginx | 80 | Reverse proxy (routes traffic) |
+To run in detached mode (background):
 
-**Step 5: Open the app**
+```bash
+./scripts/local-docker.sh up -d
+```
+
+To stop everything:
+
+```bash
+./scripts/local-docker.sh down
+```
+
+> The script automatically copies the core package into the API and Frontend build contexts (mirroring what CI/CD does), then cleans up when finished.
+
+This starts **5 containers**:
+| Container | Host Port | What It Does |
+|---|---|---|
+| MariaDB | 3307 | Database (internal port 3306) |
+| Redis | 6380 | Cache (internal port 6379) |
+| NestJS API | 3100 | Backend REST API (internal port 3000) |
+| Next.js Frontend | 3101 | Kanban dashboard (internal port 3001) |
+| Nginx | 8080 | Reverse proxy (routes traffic) |
+
+> Ports are offset to avoid conflicts with local services (MariaDB, Redis, Nginx) you may already have running.
+
+**Step 3: Open the app**
 
 | URL | What You'll See |
 |---|---|
-| [http://localhost](http://localhost) | Kanban board (main app) |
-| [http://localhost:3000/api/docs](http://localhost:3000/api/docs) | Swagger API documentation |
-| [http://localhost:3000/health](http://localhost:3000/health) | API health check |
-
-> **Tip:** The local setup includes hot-reload — edit API or Frontend code and see changes instantly without restarting containers.
+| [http://localhost:8080](http://localhost:8080) | Kanban board (main app) |
+| [http://localhost:8080/api/docs](http://localhost:8080/api/docs) | Swagger API documentation (via nginx) |
+| [http://localhost:3100/api/docs](http://localhost:3100/api/docs) | Swagger API documentation (direct) |
+| [http://localhost:8080/health](http://localhost:8080/health) | API health check |
 
 ---
 
@@ -329,7 +327,8 @@ The API includes interactive documentation powered by [Swagger / OpenAPI](https:
 
 | Environment | URL |
 |---|---|
-| **Local** | [http://localhost:3000/api/docs](http://localhost:3000/api/docs) |
+| **Local (Docker)** | [http://localhost:8080/api/docs](http://localhost:8080/api/docs) or [http://localhost:3100/api/docs](http://localhost:3100/api/docs) |
+| **Local (Manual)** | [http://localhost:3000/api/docs](http://localhost:3000/api/docs) |
 | **Staging** | [https://diofa9vowlzj6.cloudfront.net/api/docs](https://diofa9vowlzj6.cloudfront.net/api/docs) |
 | **Production** | [https://d270j9db8ffegc.cloudfront.net/api/docs](https://d270j9db8ffegc.cloudfront.net/api/docs) |
 
@@ -369,7 +368,7 @@ The API repo includes a [Bruno](https://www.usebruno.com/) collection with **23 
 
 | Environment | Base URL | When to Use |
 |---|---|---|
-| **Local** | `http://localhost:3000` | Testing against your local dev server |
+| **Local** | `http://localhost:3000` | Testing against your local dev server (use `http://localhost:3100` with Docker) |
 | **Staging** | `https://diofa9vowlzj6.cloudfront.net` | Testing against the staging deployment |
 | **Production** | `https://d270j9db8ffegc.cloudfront.net` | Testing against the production deployment |
 
@@ -402,7 +401,8 @@ personal-task-tracker/
 │ ├── default.conf # Nginx config for local development
 │ └── default.conf.template # Nginx config for staging/production (with envsubst)
 ├── scripts/
-│ └── setup-ec2.sh # EC2 instance bootstrap script
+│ ├── setup-ec2.sh # EC2 instance bootstrap script
+│ └── local-docker.sh # Helper script for local Docker setup
 ├── docker-compose.local.yml # Local dev (API + Frontend + MariaDB + Redis + Nginx)
 ├── docker-compose.api-staging.yml # Staging API (ECR image + Redis)
 ├── docker-compose.api-production.yml # Production API (ECR image + Redis)
@@ -426,7 +426,7 @@ personal-task-tracker-core/
 │ ├── validation.ts # Validation rules (title length, allowed statuses, etc.)
 │ ├── errors.ts # Custom error classes (NotFoundError, ValidationError, etc.)
 │ └── constants.ts # Shared constants (task statuses, limits)
-├── tests/ # 42 unit tests
+├── tests/ # 41 unit tests
 ├── jest.config.js
 ├── tsconfig.json
 └── package.json
@@ -441,7 +441,7 @@ personal-task-tracker-api/
 │ ├── app.module.ts # Root module
 │ ├── tasks/
 │ │ ├── tasks.module.ts # Tasks feature module
-│ │ ├── tasks.controller.ts # REST endpoints (GET, POST, PATCH, DELETE)
+│ │ ├── tasks.controller.ts # REST endpoints (GET, POST, PUT, DELETE)
 │ │ ├── tasks.service.ts # Business logic + Redis caching
 │ │ ├── dto/ # Request/response DTOs with class-validator
 │ │ └── entities/ # TypeORM entity (maps to MariaDB table)
@@ -451,10 +451,11 @@ personal-task-tracker-api/
 │ │ └── health.service.ts # DB + Redis connectivity checks
 │ ├── config/ # Database and Redis configuration
 │ └── common/
+│ ├── dto/ # Swagger response schema DTOs
 │ ├── filters/ # Global exception filter
 │ └── interceptors/ # Request logging interceptor
 ├── test/ # Integration tests
-├── bruno/ # Bruno API collection (22 requests)
+├── bruno/ # Bruno API collection (23 requests)
 ├── Dockerfile
 └── package.json
 ```
@@ -471,18 +472,20 @@ personal-task-tracker-frontend/
 │ ├── components/
 │ │ ├── Providers.tsx # React Query + Toast provider wrapper
 │ │ └── kanban/
-│ │   ├── KanbanBoard.tsx # Main board with drag-and-drop context
+│ │   ├── KanbanBoard.tsx # Main board with drag-and-drop context and sort dropdown
 │ │   ├── KanbanColumn.tsx # Single column (To Do / In Progress / Done)
-│ │   ├── KanbanCard.tsx # Draggable task card
+│ │   ├── KanbanCard.tsx # Task card: checkbox, edit/delete/drag icons, date
 │ │   ├── TaskModal.tsx # Create/edit task modal
 │ │   ├── DeleteConfirmModal.tsx # Delete confirmation dialog
 │ │   └── KanbanSkeleton.tsx # Loading skeleton for the board
 │ ├── hooks/
 │ │ ├── useTasks.ts # React Query hooks (CRUD operations)
 │ │ ├── useTaskModal.ts # Modal open/close/submit state management
-│ │ └── useDeleteConfirmation.ts # Delete confirmation state management
+│ │ ├── useDeleteConfirmation.ts # Delete confirmation state management
+│ │ └── useTaskSort.ts # Client-side sort by date or status
 │ ├── lib/
-│ │ ├── api.ts # Axios HTTP client for the API
+│ │ ├── api.ts # Axios HTTP client with localStorage fallback
+│ │ ├── local-storage.ts # localStorage CRUD cache for offline support
 │ │ └── status-config.ts # Shared status labels, colors, column config
 │ └── test/
 │   └── mocks.ts # Shared mock task factory for tests
@@ -517,11 +520,26 @@ No manual steps needed. Just push your code and staging updates within minutes.
 
 Production deploys require a **manual trigger** for safety:
 
+**Option 1: Via GitHub UI**
+
 1. Go to the [Actions tab](https://github.com/nurulizyansyaza/personal-task-tracker/actions) in this repo
-2. Select the **"Deploy Production"** workflow
+2. Select the **"Deploy to Production"** workflow
 3. Click **"Run workflow"**
-4. Type `deploy` in the confirmation field
-5. Click **"Run workflow"** again
+4. Select the `main` branch
+5. Type `deploy` in the confirmation field
+6. Click **"Run workflow"** again
+
+**Option 2: Via GitHub CLI**
+
+```bash
+gh workflow run "Deploy to Production" --repo nurulizyansyaza/personal-task-tracker --ref main -f confirm=deploy
+```
+
+To check deployment status:
+
+```bash
+gh run list --workflow="Deploy to Production" --repo nurulizyansyaza/personal-task-tracker --limit 5
+```
 
 ### Deployment Pipeline
 
