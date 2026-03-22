@@ -28,21 +28,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: nurulizyansyaza/personal-task-tracker-api
-          token: ${{ secrets.DOCKER_REPO_PAT }}
           path: personal-task-tracker-api
 
       - name: Checkout Core Source
         uses: actions/checkout@v4
         with:
           repository: nurulizyansyaza/personal-task-tracker-core
-          token: ${{ secrets.DOCKER_REPO_PAT }}
           path: personal-task-tracker-core
 
       - name: Checkout Frontend Source
         uses: actions/checkout@v4
         with:
           repository: nurulizyansyaza/personal-task-tracker-frontend
-          token: ${{ secrets.DOCKER_REPO_PAT }}
           path: personal-task-tracker-frontend
 
       - name: Configure AWS Credentials
