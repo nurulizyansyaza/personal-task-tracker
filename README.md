@@ -26,7 +26,7 @@ A full-stack **Kanban task management application** built with NestJS, Next.js, 
 - [AWS Infrastructure](#aws-infrastructure)
 - [Environment Variables](#environment-variables)
 - [Live URLs](#live-urls)
-- [Future Improvements](#future-improvements)
+- [Assumptions and Tradeoffs](#assumptions-and-tradeoffs)
 
 ---
 
@@ -677,16 +677,39 @@ See `.env.frontend.example` for the template:
 
 ---
 
-## Future Improvements
+## Assumptions and Tradeoffs
 
-- **Custom Domain** — Add a custom domain with Route 53 + ACM certificates (instead of CloudFront URLs)
-- **ECS Fargate** — Migrate from bare EC2 to ECS Fargate for managed container orchestration
-- **ElastiCache** — Replace Docker-hosted Redis with AWS ElastiCache for better reliability
-- **Blue-Green Deploys** — Implement blue-green or rolling deployments for zero-downtime releases
-- **E2E Tests** — Add comprehensive end-to-end tests with Playwright
-- **Monitoring** — Set up CloudWatch dashboards and SNS alerting for production monitoring
-- **Database Migrations** — Switch from TypeORM `synchronize: true` to proper migration scripts
-- **Infrastructure as Code** — Add Terraform or AWS CDK for reproducible infrastructure provisioning
+### Assumptions
+
+- **Task status is a fixed enum** — only three statuses exist: `todo`, `in_progress`, and `done`. The system validates this at both the core library and API DTO level. Adding new statuses requires a core library update across all consumers.
+- **Task IDs are auto-incremented integers** — managed by MariaDB. The API never accepts client-supplied IDs for creation.
+- **Title is required, description is optional** — title has a 255-character limit enforced at core validation, API DTO, and frontend form levels. Description allows up to 1000 characters.
+- **Single-user system** — there is no authentication or multi-tenancy. All tasks belong to a single shared pool. This simplifies the architecture but means the system is not production-ready for multi-user scenarios.
+- **Timestamps are managed by the database** — `created_at` is set on insert by TypeORM. The API does not accept or override timestamps from the client.
+- **Drag-and-drop updates only status** — when a task is dragged between Kanban columns, only the `status` field is updated. Title and description remain unchanged.
+
+### Tradeoffs
+
+- **Multi-repo over monorepo** — chose 4 separate repos (orchestration, core, API, frontend) to keep each concern isolated and independently deployable. Tradeoff: slightly more complex setup (clone 4 repos, `file:` dependency linking) but each repo has its own CI/CD, test suite, and clear boundaries.
+- **Shared core as `file:` dependency** — the core library is consumed via `file:../personal-task-tracker-core` in development and copied into Docker build contexts in CI. Tradeoff: no npm registry publishing overhead, but CI needs extra steps to clone and build core before building consumers.
+- **Split-region deployment** — API in `ap-southeast-1` (closer to database), frontend in `us-east-1` (CloudFront optimized). Tradeoff: lower latency for each tier's primary concern, but cross-region API proxying adds a network hop for frontend-to-API calls.
+- **Nginx reverse proxy over direct API calls** — frontend Nginx proxies `/tasks` and `/api/docs` to the API CloudFront distribution. Tradeoff: simpler CORS configuration (same-origin from the browser's perspective) but adds a proxy layer that must be configured correctly.
+- **Docker Compose over ECS/Kubernetes** — used Docker Compose on bare EC2 for simplicity. Tradeoff: easy to understand and debug, but no auto-scaling, self-healing, or rolling deployments. Suitable for a personal project, not for high-availability production.
+- **TypeORM `synchronize: true`** — auto-syncs entity schema to the database. Tradeoff: fast iteration during development but dangerous for production (can drop columns/data). Should be replaced with migration scripts for a real production system.
+- **Manual production deploy, auto staging** — staging auto-deploys on push to the `staging` branch; production requires a manual `workflow_dispatch` with a confirmation input. Tradeoff: prevents accidental production deployments but requires an extra manual step.
+
+### What I Would Do Next With More Time
+
+- **Add end-to-end tests** — Playwright tests covering the full flow from creating a task to dragging it across columns.
+- **Custom domain** — set up Route 53 with a custom domain and ACM certificates instead of CloudFront-generated URLs.
+- **Add monitoring** — CloudWatch dashboards, SNS alerts, and X-Ray tracing for API performance visibility.
+- **Database migrations** — switch from TypeORM `synchronize: true` to proper migration scripts with version control.
+- **User authentication** — add JWT-based auth for the API and a login flow in the frontend for multi-user support.
+- **Infrastructure as Code** — add Terraform or AWS CDK for reproducible infrastructure provisioning.
+- **ECS Fargate** — migrate from bare EC2 to ECS Fargate for managed container orchestration with auto-scaling.
+- **ElastiCache** — replace Docker-hosted Redis with AWS ElastiCache for better reliability and managed failover.
+- **WebSocket support** — real-time task updates across browser tabs instead of polling via React Query.
+- **Role-based access control** — implement different access levels (viewer, editor, admin) restricting certain actions based on roles.
 
 ---
 
@@ -695,6 +718,6 @@ See `.env.frontend.example` for the template:
 | Repo | Description | Tests |
 |------|-------------|-------|
 | [personal-task-tracker](https://github.com/nurulizyansyaza/personal-task-tracker) | Orchestration — CI/CD, Docker, AWS infra | — |
-| [personal-task-tracker-core](https://github.com/nurulizyansyaza/personal-task-tracker-core) | Shared TypeScript library — types, validation, errors | 42 |
+| [personal-task-tracker-core](https://github.com/nurulizyansyaza/personal-task-tracker-core) | Shared TypeScript library — types, validation, errors | 41 |
 | [personal-task-tracker-api](https://github.com/nurulizyansyaza/personal-task-tracker-api) | NestJS REST API with security middleware | 84 |
-| [personal-task-tracker-frontend](https://github.com/nurulizyansyaza/personal-task-tracker-frontend) | Next.js Kanban dashboard | 52 |
+| [personal-task-tracker-frontend](https://github.com/nurulizyansyaza/personal-task-tracker-frontend) | Next.js Kanban dashboard | 67 |
