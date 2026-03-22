@@ -2,6 +2,11 @@
 # API Production - ap-southeast-1
 # ============================================
 # API + Redis only (split from frontend)
+# Differences from staging:
+#   - container names use "-production" suffix
+#   - ECR image tag is "production"
+#   - NODE_ENV is "production"
+#   - Redis has persistence (appendonly) and memory limits
 # ============================================
 
 services:

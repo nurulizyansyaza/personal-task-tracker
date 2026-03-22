@@ -2,6 +2,9 @@
 # Frontend Production - us-east-1
 # ============================================
 # Frontend + Nginx (proxies API to ap-southeast-1)
+# Differences from staging:
+#   - container names use "-production" suffix
+#   - ECR image tag is "production"
 # ============================================
 
 services:

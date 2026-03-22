@@ -133,4 +133,4 @@ jobs:
             docker compose -f docker-compose.frontend-production.yml up -d --remove-orphans
             docker image prune -f || true
 
-            echo "✅ Production deployment complete!"
+            echo "Production deployment complete!"

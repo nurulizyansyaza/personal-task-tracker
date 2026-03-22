@@ -304,10 +304,10 @@ npm test
 # API tests (84 tests)
 cd personal-task-tracker-api
 npm test # Run all unit tests
-npm run test:ptt # Run integration tests
+npm run test:ptt-tomei # Run integration tests
 npm run test:cov # Run with coverage report
 
-# Frontend tests (52 tests)
+# Frontend tests (67 tests)
 cd personal-task-tracker-frontend
 npm test # Run all tests
 npm run test:cov # Run with coverage report
@@ -430,20 +430,22 @@ personal-task-tracker-frontend/
 │ │ └── globals.css # Tailwind CSS imports
 │ ├── components/
 │ │ ├── Providers.tsx # React Query + Toast provider wrapper
-│ │ ├── kanban/
-│ │ │ ├── KanbanBoard.tsx # Main board with drag-and-drop context
-│ │ │ ├── KanbanColumn.tsx # Single column (To Do / In Progress / Done)
-│ │ │ ├── KanbanCard.tsx # Draggable task card
-│ │ │ ├── TaskModal.tsx # Create/edit task modal
-│ │ │ ├── DeleteConfirmModal.tsx # Delete confirmation dialog
-│ │ │ └── KanbanSkeleton.tsx # Loading skeleton for the board
-│ │ ├── TaskForm.tsx # Legacy task form component
-│ │ ├── TaskList.tsx # Legacy list view component
-│ │ └── StatusFilter.tsx # Status filter dropdown
+│ │ └── kanban/
+│ │   ├── KanbanBoard.tsx # Main board with drag-and-drop context
+│ │   ├── KanbanColumn.tsx # Single column (To Do / In Progress / Done)
+│ │   ├── KanbanCard.tsx # Draggable task card
+│ │   ├── TaskModal.tsx # Create/edit task modal
+│ │   ├── DeleteConfirmModal.tsx # Delete confirmation dialog
+│ │   └── KanbanSkeleton.tsx # Loading skeleton for the board
 │ ├── hooks/
-│ │ └── useTasks.ts # React Query hooks (CRUD operations)
-│ └── lib/
-│ └── api.ts # Axios HTTP client for the API
+│ │ ├── useTasks.ts # React Query hooks (CRUD operations)
+│ │ ├── useTaskModal.ts # Modal open/close/submit state management
+│ │ └── useDeleteConfirmation.ts # Delete confirmation state management
+│ ├── lib/
+│ │ ├── api.ts # Axios HTTP client for the API
+│ │ └── status-config.ts # Shared status labels, colors, column config
+│ └── test/
+│   └── mocks.ts # Shared mock task factory for tests
 ├── Dockerfile
 └── package.json
 ```

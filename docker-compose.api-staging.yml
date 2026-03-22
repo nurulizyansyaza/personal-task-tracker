@@ -2,6 +2,11 @@
 # API Staging - ap-southeast-1
 # ============================================
 # API + Redis only (split from frontend)
+# Differences from production:
+#   - container names use "-staging" suffix
+#   - ECR image tag is "staging"
+#   - NODE_ENV is "staging"
+#   - Redis uses default config (no persistence/memory limits)
 # ============================================
 
 services:
