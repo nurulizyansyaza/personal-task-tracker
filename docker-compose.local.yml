@@ -95,6 +95,70 @@ services:
       - api
       - frontend
 
+  # ============================================
+  # Test Runners
+  # ============================================
+  # Usage:
+  #   docker compose -f docker-compose.local.yml run --rm test          # all tests
+  #   docker compose -f docker-compose.local.yml run --rm test-core     # core only
+  #   docker compose -f docker-compose.local.yml run --rm test-api      # api only
+  #   docker compose -f docker-compose.local.yml run --rm test-frontend # frontend only
+  # ============================================
+
+  test-core:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ../personal-task-tracker-core:/app
+      - /app/node_modules
+    command: sh -c "npm install --silent && npm test"
+    profiles: ["test"]
+
+  test-api:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ../personal-task-tracker-api:/app
+      - /app/node_modules
+      - ../personal-task-tracker-core:/core
+    command: sh -c "cp -r /core /tmp/personal-task-tracker-core && npm install --silent && rm -rf node_modules/personal-task-tracker-core && cp -r /tmp/personal-task-tracker-core node_modules/personal-task-tracker-core && npm test"
+    profiles: ["test"]
+
+  test-frontend:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ../personal-task-tracker-frontend:/app
+      - /app/node_modules
+      - ../personal-task-tracker-core:/core
+    command: sh -c "cp -r /core /tmp/personal-task-tracker-core && npm install --silent && npm install --silent ts-node && rm -rf node_modules/personal-task-tracker-core && cp -r /tmp/personal-task-tracker-core node_modules/personal-task-tracker-core && npm test"
+    profiles: ["test"]
+
+  test:
+    image: node:20-alpine
+    working_dir: /workspace
+    volumes:
+      - ../personal-task-tracker-core:/workspace/personal-task-tracker-core
+      - ../personal-task-tracker-api:/workspace/personal-task-tracker-api
+      - ../personal-task-tracker-frontend:/workspace/personal-task-tracker-frontend
+      - /workspace/personal-task-tracker-core/node_modules
+      - /workspace/personal-task-tracker-api/node_modules
+      - /workspace/personal-task-tracker-frontend/node_modules
+    command: >
+      sh -c "
+        echo '--- Core Tests (41) ---' &&
+        cd /workspace/personal-task-tracker-core && npm install --silent && npm test &&
+        echo '' &&
+        echo '--- API Tests (74) ---' &&
+        cd /workspace/personal-task-tracker-api && npm install --silent && rm -rf node_modules/personal-task-tracker-core && cp -r /workspace/personal-task-tracker-core node_modules/personal-task-tracker-core && npm test &&
+        echo '' &&
+        echo '--- Frontend Tests (96) ---' &&
+        cd /workspace/personal-task-tracker-frontend && npm install --silent && npm install --silent ts-node && rm -rf node_modules/personal-task-tracker-core && cp -r /workspace/personal-task-tracker-core node_modules/personal-task-tracker-core && npm test &&
+        echo '' &&
+        echo '=== All 211 tests passed ==='
+      "
+    profiles: ["test"]
+
 volumes:
   mariadb_data:
   redis_data:

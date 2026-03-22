@@ -97,13 +97,21 @@ case "$ACTION" in
     docker compose -f docker-compose.local.yml build $EXTRA_ARGS
     ;;
 
+  test)
+    prepare_contexts
+    trap cleanup EXIT
+    cd "$ORCH_DIR"
+    docker compose -f docker-compose.local.yml run --rm test $EXTRA_ARGS
+    ;;
+
   *)
-    echo "Usage: $0 [up|down|restart|build]"
+    echo "Usage: $0 [up|down|restart|build|test]"
     echo ""
     echo "  up       Build and start all containers (default)"
     echo "  down     Stop containers and clean up build contexts"
     echo "  restart  Stop, rebuild, and start all containers"
     echo "  build    Build images without starting"
+    echo "  test     Run all 211 tests (core + API + frontend) in Docker"
     exit 1
     ;;
 esac

@@ -296,7 +296,21 @@ The project has **211 tests** across all 3 code repositories:
 
 ### How to Run Tests
 
-Each repository has its own test suite. Run them from the respective repo folder:
+#### Via Docker (recommended — no local Node.js setup required)
+
+```bash
+cd personal-task-tracker
+
+# Run ALL 211 tests at once
+./scripts/local-docker.sh test
+
+# Run individual repo tests
+docker compose -f docker-compose.local.yml run --rm test-core      # Core — 41 tests
+docker compose -f docker-compose.local.yml run --rm test-api       # API — 74 tests
+docker compose -f docker-compose.local.yml run --rm test-frontend  # Frontend — 96 tests
+```
+
+#### Via npm (from each repo folder)
 
 ```bash
 # Core package tests (41 tests)
@@ -305,14 +319,14 @@ npm test
 
 # API tests (74 tests)
 cd personal-task-tracker-api
-npm test # Run all unit tests
-npm run test:ptt-tomei # Run integration tests
-npm run test:cov # Run with coverage report
+npm test                   # Run all unit tests
+npm run test:ptt-tomei     # Run integration tests
+npm run test:cov           # Run with coverage report
 
 # Frontend tests (96 tests)
 cd personal-task-tracker-frontend
-npm test # Run all tests
-npm run test:cov # Run with coverage report
+npm test                   # Run all tests
+npm run test:cov           # Run with coverage report
 ```
 
 > **Tip:** Use `npm run test:watch` in any repo to re-run tests automatically when you save a file.
