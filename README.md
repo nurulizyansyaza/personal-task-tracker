@@ -20,6 +20,7 @@ A full-stack **Kanban task management application** built with NestJS, Next.js, 
 - [Tech Stack](#tech-stack)
 - [Quick Start](#quick-start)
 - [Testing](#testing)
+- [Swagger API Docs](#swagger-api-docs)
 - [API Testing with Bruno](#api-testing-with-bruno)
 - [Project Structure](#project-structure)
 - [Deployment](#deployment)
@@ -320,17 +321,48 @@ npm run test:cov # Run with coverage report
 
 ---
 
+## Swagger API Docs
+
+The API includes interactive documentation powered by [Swagger / OpenAPI](https://swagger.io/). Every endpoint is documented with request/response schemas, query parameters, and error codes — and you can test them directly from the browser.
+
+### Accessing Swagger UI
+
+| Environment | URL |
+|---|---|
+| **Local** | [http://localhost:3000/api/docs](http://localhost:3000/api/docs) |
+| **Staging** | [https://diofa9vowlzj6.cloudfront.net/api/docs](https://diofa9vowlzj6.cloudfront.net/api/docs) |
+| **Production** | [https://d270j9db8ffegc.cloudfront.net/api/docs](https://d270j9db8ffegc.cloudfront.net/api/docs) |
+
+### How to Use
+
+1. Open any of the URLs above in your browser.
+2. All endpoints are grouped under **Tasks** and **Health** tags.
+3. Click an endpoint to expand it and see parameters, request body schema, and response examples.
+4. Click **"Try it out"**, fill in the fields, and click **"Execute"** to send a live request.
+5. The response body, status code, and headers appear inline.
+
+### What's Documented
+
+- All CRUD endpoints (`GET`, `POST`, `PUT`, `DELETE` for `/tasks`)
+- Health check endpoint (`GET /health`)
+- Success response wrapper: `{ success, data, message }`
+- Error response structure: `{ success: false, statusCode, error, message, errors[], timestamp, path }`
+- Enum values for task status (TODO, IN_PROGRESS, DONE)
+- Validation constraints and error codes
+
+---
+
 ## API Testing with Bruno
 
-The API repo includes a [Bruno](https://www.usebruno.com/) collection with **22 pre-built requests** for testing the API manually. Bruno is a free, open-source API client (like Postman, but stores collections as files in your repo).
+The API repo includes a [Bruno](https://www.usebruno.com/) collection with **23 pre-built requests** for testing the API manually. Bruno is a free, open-source API client (like Postman, but stores collections as files in your repo).
 
 ### What's Included
 
 | Folder | Requests | Description |
 |---|---|---|
-| `health/` | 1 | Health check endpoint |
-| `tasks/` | 9 | CRUD operations — create, read, update, delete tasks |
-| `tasks-errors/` | 5 | Error scenarios — not found, invalid ID, non-existent task |
+| `health/` | 2 | Health check, Swagger docs |
+| `tasks/` | 8 | CRUD operations — create, read, update, delete tasks |
+| `tasks-errors/` | 6 | Error scenarios — not found, invalid ID, non-existent task |
 | `tasks-validation/` | 7 | Validation — missing title, empty body, title too long, invalid status |
 
 ### 3 Pre-configured Environments
@@ -348,6 +380,11 @@ The API repo includes a [Bruno](https://www.usebruno.com/) collection with **22 
 3. Navigate to `personal-task-tracker-api/bruno/` and open it
 4. Select an environment from the dropdown (Local, Staging, or Production)
 5. Click any request and hit **Send**
+
+Each request includes:
+- Pre-filled request body with realistic example data
+- Assertions that validate response status codes and body structure
+- Documentation describing expected behaviour and response format
 
 ---
 
