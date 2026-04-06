@@ -129,8 +129,8 @@ jobs:
           docker network create ptt-network 2>/dev/null || true
 
           # Deploy API
-          docker compose -f docker-compose.api-production.yml pull
-          docker compose -f docker-compose.api-production.yml up -d
+          docker compose --env-file .env.api.production -f docker-compose.api-production.yml pull
+          docker compose --env-file .env.api.production -f docker-compose.api-production.yml up -d
 
           # Deploy Frontend
           docker compose -f docker-compose.frontend-production.yml pull
