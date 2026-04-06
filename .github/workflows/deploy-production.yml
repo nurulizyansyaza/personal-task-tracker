@@ -95,8 +95,7 @@ jobs:
         run: |
           cd personal-task-tracker-frontend
           docker build \
-            --build-arg "NEXT_PUBLIC_API_URL=${{ secrets.PRODUCTION_API_URL }}" \
-            --build-arg NEXT_PUBLIC_BASE_PATH=/personal-task-tracker \
+            --build-arg "NEXT_PUBLIC_API_URL=/api" \
             -t ${{ env.FRONTEND_IMAGE }}:production .
           docker push ${{ env.FRONTEND_IMAGE }}:production
 
@@ -137,8 +136,8 @@ jobs:
           docker compose -f docker-compose.frontend-production.yml pull
           docker compose -f docker-compose.frontend-production.yml up -d --remove-orphans
 
-          # Deploy/Restart Nginx
-          docker compose -f docker-compose.nginx.yml up -d --remove-orphans
+          # Reload host Nginx
+          sudo nginx -s reload || true
 
           docker image prune -f || true
           echo "Production deployment complete!"

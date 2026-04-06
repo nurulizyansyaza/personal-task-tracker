@@ -29,6 +29,8 @@ services:
     image: ghcr.io/nurulizyansyaza/ptt-api:production
     container_name: ptt-api-production
     restart: always
+    ports:
+      - "127.0.0.1:3200:3000"
     environment:
       NODE_ENV: production
       PORT: 3000

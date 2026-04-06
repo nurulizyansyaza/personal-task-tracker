@@ -79,8 +79,7 @@ jobs:
         run: |
           cd personal-task-tracker-frontend
           docker build \
-            --build-arg "NEXT_PUBLIC_API_URL=${{ secrets.STAGING_API_URL }}" \
-            --build-arg NEXT_PUBLIC_BASE_PATH=/staging/personal-task-tracker \
+            --build-arg "NEXT_PUBLIC_API_URL=/api" \
             -t ${{ env.FRONTEND_IMAGE }}:staging .
           docker push ${{ env.FRONTEND_IMAGE }}:staging
 
@@ -121,8 +120,8 @@ jobs:
           docker compose -f docker-compose.frontend-staging.yml pull
           docker compose -f docker-compose.frontend-staging.yml up -d --remove-orphans
 
-          # Deploy/Restart Nginx
-          docker compose -f docker-compose.nginx.yml up -d --remove-orphans
+          # Reload host Nginx
+          sudo nginx -s reload || true
 
           docker image prune -f || true
           echo "Staging deployment complete!"

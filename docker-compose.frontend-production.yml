@@ -12,6 +12,8 @@ services:
     image: ghcr.io/nurulizyansyaza/ptt-frontend:production
     container_name: ptt-frontend-production
     restart: always
+    ports:
+      - "127.0.0.1:3201:3001"
     networks:
       - ptt-network
 

@@ -28,6 +28,8 @@ services:
     image: ghcr.io/nurulizyansyaza/ptt-api:staging
     container_name: ptt-api-staging
     restart: always
+    ports:
+      - "127.0.0.1:3100:3000"
     environment:
       NODE_ENV: staging
       PORT: 3000
