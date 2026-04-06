@@ -1,13 +1,13 @@
 # ============================================
-# Staging: Auto-Deploy on Push (Multi-Region)
+# [ARCHIVED] Staging: Auto-Deploy on Push (Multi-Region)
 # ============================================
 # API → ap-southeast-1, Frontend → us-east-1
+# NOTE: This workflow is archived. Triggers disabled.
 
-name: Deploy to Staging
+name: Deploy to Staging (Archived - AWS)
 
 on:
-  push:
-    branches: [staging]
+  workflow_dispatch:
 
 env:
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

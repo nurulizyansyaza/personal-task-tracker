@@ -1,9 +1,10 @@
 # ============================================
-# Production: Manual Deploy (Multi-Region)
+# [ARCHIVED] Production: Manual Deploy (Multi-Region)
 # ============================================
 # API → ap-southeast-1, Frontend → us-east-1
+# NOTE: This workflow is archived. Do not use.
 
-name: Deploy to Production
+name: Deploy to Production (Archived - AWS)
 
 on:
   workflow_dispatch:
