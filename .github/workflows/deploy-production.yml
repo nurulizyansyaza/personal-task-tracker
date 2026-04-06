@@ -130,11 +130,11 @@ jobs:
 
           # Deploy API
           docker compose -f docker-compose.api-production.yml pull
-          docker compose -f docker-compose.api-production.yml up -d --remove-orphans
+          docker compose -f docker-compose.api-production.yml up -d
 
           # Deploy Frontend
           docker compose -f docker-compose.frontend-production.yml pull
-          docker compose -f docker-compose.frontend-production.yml up -d --remove-orphans
+          docker compose -f docker-compose.frontend-production.yml up -d
 
           # Reload host Nginx
           sudo nginx -s reload || true
