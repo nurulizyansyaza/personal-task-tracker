@@ -79,7 +79,7 @@ jobs:
         run: |
           cd personal-task-tracker-frontend
           docker build \
-            --build-arg NEXT_PUBLIC_API_URL=${{ secrets.STAGING_API_URL }} \
+            --build-arg "NEXT_PUBLIC_API_URL=${{ secrets.STAGING_API_URL }}" \
             --build-arg NEXT_PUBLIC_BASE_PATH=/staging/personal-task-tracker \
             -t ${{ env.FRONTEND_IMAGE }}:staging .
           docker push ${{ env.FRONTEND_IMAGE }}:staging
