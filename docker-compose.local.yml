@@ -72,11 +72,11 @@ services:
       context: ../personal-task-tracker-frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8080/tasks
+        - NEXT_PUBLIC_API_URL=http://localhost:8080
     container_name: ptt-frontend
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8080/tasks
+      NEXT_PUBLIC_API_URL: http://localhost:8080
     ports:
       - "3101:3001"
     depends_on:

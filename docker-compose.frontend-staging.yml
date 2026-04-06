@@ -1,29 +1,20 @@
 # ============================================
-# Frontend Staging - us-east-1
+# Frontend Staging - Homelab (nurulizyansyaza)
 # ============================================
-# Frontend + Nginx (proxies API to ap-southeast-1)
+# Frontend only (Nginx is in docker-compose.nginx.yml)
 # Differences from production:
 #   - container names use "-staging" suffix
-#   - ECR image tag is "staging"
+#   - GHCR image tag is "staging"
 # ============================================
 
 services:
   frontend:
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/ptt-frontend:staging
+    image: ghcr.io/nurulizyansyaza/ptt-frontend:staging
     container_name: ptt-frontend-staging
     restart: always
-    environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    networks:
+      - ptt-network
 
-  nginx:
-    image: nginx:alpine
-    container_name: ptt-nginx-staging
-    restart: always
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
-    environment:
-      API_HOST: ${API_HOST:?API_HOST required}
-    depends_on:
-      - frontend
+networks:
+  ptt-network:
+    external: true
