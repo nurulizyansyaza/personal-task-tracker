@@ -100,50 +100,46 @@ jobs:
             -t ${{ env.FRONTEND_IMAGE }}:production .
           docker push ${{ env.FRONTEND_IMAGE }}:production
 
-      - name: Deploy API to Homelab
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PRODUCTION_HOMELAB_HOST }}
-          username: ${{ secrets.HOMELAB_USERNAME }}
-          key: ${{ secrets.PRODUCTION_HOMELAB_SSH_KEY }}
-          port: ${{ secrets.HOMELAB_SSH_PORT }}
-          script: |
-            cd ~/personal-task-tracker
+      - name: Setup SSH via Cloudflare Tunnel
+        run: |
+          # Install cloudflared
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
 
-            echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          # Configure SSH to use cloudflared as proxy
+          mkdir -p ~/.ssh
+          echo '${{ secrets.PRODUCTION_HOMELAB_SSH_KEY }}' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
 
-            docker network create ptt-network 2>/dev/null || true
+          cat >> ~/.ssh/config << EOF
+          Host homelab
+            HostName ${{ secrets.PRODUCTION_HOMELAB_HOST }}
+            User ${{ secrets.HOMELAB_USERNAME }}
+            IdentityFile ~/.ssh/deploy_key
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+          EOF
 
-            docker compose -f docker-compose.api-production.yml pull
-            docker compose -f docker-compose.api-production.yml up -d --remove-orphans
-            docker image prune -f || true
+      - name: Deploy to Homelab
+        run: |
+          ssh homelab << 'DEPLOY'
+          cd ~/personal-task-tracker
 
-      - name: Deploy Frontend to Homelab
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PRODUCTION_HOMELAB_HOST }}
-          username: ${{ secrets.HOMELAB_USERNAME }}
-          key: ${{ secrets.PRODUCTION_HOMELAB_SSH_KEY }}
-          port: ${{ secrets.HOMELAB_SSH_PORT }}
-          script: |
-            cd ~/personal-task-tracker
+          echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker network create ptt-network 2>/dev/null || true
 
-            docker compose -f docker-compose.frontend-production.yml pull
-            docker compose -f docker-compose.frontend-production.yml up -d --remove-orphans
-            docker image prune -f || true
+          # Deploy API
+          docker compose -f docker-compose.api-production.yml pull
+          docker compose -f docker-compose.api-production.yml up -d --remove-orphans
 
-      - name: Deploy/Restart Nginx
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PRODUCTION_HOMELAB_HOST }}
-          username: ${{ secrets.HOMELAB_USERNAME }}
-          key: ${{ secrets.PRODUCTION_HOMELAB_SSH_KEY }}
-          port: ${{ secrets.HOMELAB_SSH_PORT }}
-          script: |
-            cd ~/personal-task-tracker
+          # Deploy Frontend
+          docker compose -f docker-compose.frontend-production.yml pull
+          docker compose -f docker-compose.frontend-production.yml up -d --remove-orphans
 
-            docker compose -f docker-compose.nginx.yml up -d --remove-orphans
+          # Deploy/Restart Nginx
+          docker compose -f docker-compose.nginx.yml up -d --remove-orphans
 
-            echo "Production deployment complete!"
+          docker image prune -f || true
+          echo "Production deployment complete!"
+          DEPLOY
