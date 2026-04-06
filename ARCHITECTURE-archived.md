@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> Comprehensive architecture guide for the Personal Task Tracker — a full-stack CRUD task management application with a Kanban drag-and-drop interface, deployed on a self-hosted homelab server.
+> Comprehensive architecture guide for the Personal Task Tracker — a full-stack CRUD task management application with a Kanban drag-and-drop interface, deployed across multiple AWS regions.
 
 ## Table of Contents
 
@@ -8,7 +8,7 @@
 2. [Repository Structure Overview](#2-repository-structure-overview)
 3. [Core Library Modules](#3-core-library-modules)
 4. [Data Flow](#4-data-flow)
-5. [Homelab Production Architecture](#5-homelab-production-architecture)
+5. [AWS Production Architecture](#5-aws-production-architecture)
 6. [Deployment Pipeline](#6-deployment-pipeline)
 7. [Security Layers](#7-security-layers)
 8. [Shared Dependency Model](#8-shared-dependency-model)
@@ -29,7 +29,7 @@ graph TB
  DC["Docker Compose Files"]
  CICD["GitHub Actions CI/CD"]
  NGX["Nginx Config Templates"]
- SCRIPTS["Homelab Setup Scripts"]
+ SCRIPTS["EC2 Setup Scripts"]
  end
 
  subgraph "personal-task-tracker-core (Shared Library)"
@@ -108,11 +108,10 @@ graph TB
 personal-task-tracker-project/
 ├── personal-task-tracker/ # Orchestration (this repo)
 │ ├── docker-compose.local.yml # Local dev: API + Frontend + MariaDB + Redis + Nginx
-│ ├── docker-compose.api-staging.yml # Staging API + Redis (homelab)
-│ ├── docker-compose.api-production.yml # Production API + Redis (homelab)
-│ ├── docker-compose.frontend-staging.yml # Staging Frontend (homelab)
-│ ├── docker-compose.frontend-production.yml # Production Frontend (homelab)
-│ ├── docker-compose.nginx.yml # Shared Nginx reverse proxy (homelab)
+│ ├── docker-compose.api-staging.yml # Staging API + Redis (ap-southeast-1)
+│ ├── docker-compose.api-production.yml # Production API + Redis (ap-southeast-1)
+│ ├── docker-compose.frontend-staging.yml # Staging Frontend + Nginx (us-east-1)
+│ ├── docker-compose.frontend-production.yml # Production Frontend + Nginx (us-east-1)
 │ ├── nginx/
 │ │ ├── default.conf # Local Nginx (proxies to Docker services)
 │ │ └── default.conf.template # Staging/Prod (envsubst for API_HOST)
@@ -120,13 +119,13 @@ personal-task-tracker-project/
 │ │ ├── deploy-staging.yml # Auto-deploy on push to staging branch
 │ │ └── deploy-production.yml # Manual deploy via workflow_dispatch
 │ ├── scripts/
-│ │ └── setup-homelab.sh # Homelab provisioning (Docker, firewall)
+│ │ └── setup-ec2.sh # EC2 provisioning (Docker, AWS CLI)
 │ ├── .env.local.example # Env template for local dev
-│ ├── .env.api.example # Env template for API on homelab
-│ ├── .env.frontend.example # Env template for Frontend on homelab
+│ ├── .env.api.example # Env template for API EC2
+│ ├── .env.frontend.example # Env template for Frontend EC2
 │ ├── .env.staging.example # Env template for staging
 │ ├── README.md
-│ ├── HOMELAB-INFRASTRUCTURE.md # Detailed homelab setup guide
+│ ├── AWS-INFRASTRUCTURE.md # Detailed AWS setup guide
 │ └── ARCHITECTURE.md # This file
 │
 ├── personal-task-tracker-core/ # Shared NPM package
@@ -302,9 +301,10 @@ sequenceDiagram
  participant RQ as React Query (useTasks)
  participant AX as Axios (api.ts)
  participant NGX as Nginx
+ participant CF as CloudFront (API)
  participant API as NestJS Controller
  participant SVC as Tasks Service
- participant DB as MariaDB (Docker)
+ participant DB as MariaDB (RDS)
 
  User->>KB: Clicks "+" button on TODO column
  KB->>TM: Opens TaskModal (mode: create)
@@ -312,16 +312,18 @@ sequenceDiagram
  TM->>RQ: Calls createTask mutation
  RQ->>AX: taskApi.create({ title, description })
  AX->>NGX: POST /tasks (same-origin request)
- NGX->>API: Proxies to http://api:3000/tasks
-
+ NGX->>CF: Proxies to https://API_CLOUDFRONT/tasks
+ CF->>API: Forward POST /tasks
+ 
  Note over API: Middleware Stack:<br/>Helmet → CORS → Rate Limit → ValidationPipe
-
+ 
  API->>SVC: tasksService.create(createTaskDto)
  SVC->>SVC: Trims whitespace, sets status=TODO
  SVC->>DB: INSERT INTO tasks (title, description, status)
  DB-->>SVC: Returns new task with id
  SVC-->>API: Returns Task entity
- API-->>NGX: 201 { success: true, data: task }
+ API-->>CF: 201 { success: true, data: task }
+ CF-->>NGX: Forward response
  NGX-->>AX: JSON response
  AX-->>RQ: Resolves promise
  RQ->>RQ: Invalidates ['tasks'] query cache
@@ -342,9 +344,10 @@ sequenceDiagram
  participant RQ as React Query (useTasks)
  participant AX as Axios (api.ts)
  participant NGX as Nginx
+ participant CF as CloudFront (API)
  participant API as NestJS Controller
  participant SVC as Tasks Service
- participant DB as MariaDB (Docker)
+ participant DB as MariaDB (RDS)
 
  User->>DND: Drags KanbanCard from TODO column
  DND->>KB: onDragStart(activeTask)
@@ -359,15 +362,17 @@ sequenceDiagram
 
  RQ->>AX: taskApi.update(id, { status: 'IN_PROGRESS' })
  AX->>NGX: PUT /tasks/:id (same-origin request)
- NGX->>API: Proxies to http://api:3000/tasks/:id
-
+ NGX->>CF: Proxies to https://API_CLOUDFRONT/tasks/:id
+ CF->>API: Forward PUT /tasks/:id
+ 
  Note over API: Middleware Stack:<br/>Helmet → CORS → Rate Limit → ValidationPipe
 
  API->>SVC: tasksService.update(id, updateTaskDto)
  SVC->>DB: UPDATE tasks SET status='IN_PROGRESS' WHERE id=:id
  DB-->>SVC: Returns updated task
  SVC-->>API: Returns Task entity
- API-->>NGX: 200 { success: true, data: task }
+ API-->>CF: 200 { success: true, data: task }
+ CF-->>NGX: Forward response
  NGX-->>AX: JSON response
  AX-->>RQ: Resolves promise
  RQ->>RQ: Invalidates ['tasks'] query cache
@@ -379,9 +384,9 @@ sequenceDiagram
 
 ---
 
-## 5. Homelab Production Architecture
+## 5. AWS Production Architecture
 
-The application is deployed on a single homelab server running all services as Docker containers, with Nginx as the reverse proxy providing HTTPS termination.
+The application is deployed across two AWS regions to optimise latency — the API sits close to the database in Singapore, while the frontend leverages CloudFront's US-based edge network.
 
 ```mermaid
 graph TB
@@ -389,76 +394,93 @@ graph TB
  USER["Browser"]
  end
 
- subgraph "Nginx Reverse Proxy (Let's Encrypt HTTPS)"
- NG_FE_S["nurulizyansyaza.com/staging/personal-task-tracker<br/>(Frontend Staging)"]
- NG_FE_P["nurulizyansyaza.com/personal-task-tracker<br/>(Frontend Production)"]
- NG_API_S["nurulizyansyaza.com/staging/personal-task-tracker/api<br/>(API Staging)"]
- NG_API_P["nurulizyansyaza.com/personal-task-tracker/api<br/>(API Production)"]
+ subgraph "AWS CloudFront (Global Edge)"
+ CF_FE_S["CloudFront<br/>d179mmtd1r518i.cloudfront.net<br/>(Frontend Staging)"]
+ CF_FE_P["CloudFront<br/>d1w6dngwkrqpvq.cloudfront.net<br/>(Frontend Production)"]
+ CF_API_S["CloudFront<br/>diofa9vowlzj6.cloudfront.net<br/>(API Staging)"]
+ CF_API_P["CloudFront<br/>d270j9db8ffegc.cloudfront.net<br/>(API Production)"]
  end
 
- subgraph "Homelab Server — Docker Containers"
- subgraph "Staging Stack"
+ subgraph "us-east-1 (N. Virginia)"
+ subgraph "EC2 — Frontend Staging"
+ NGX_S["Nginx :80<br/>Reverse Proxy"]
  FE_S["Next.js :3001<br/>Standalone Mode"]
+ end
+ subgraph "EC2 — Frontend Production"
+ NGX_P["Nginx :80<br/>Reverse Proxy"]
+ FE_P["Next.js :3001<br/>Standalone Mode"]
+ end
+ ECR_FE["ECR: ptt-frontend<br/>(staging + production tags)"]
+ end
+
+ subgraph "ap-southeast-1 (Singapore)"
+ subgraph "EC2 — API Staging"
  API_S["NestJS :3000"]
  REDIS_S["Redis :6379<br/>(Docker sidecar)"]
  end
- subgraph "Production Stack"
- FE_P["Next.js :3001<br/>Standalone Mode"]
+ subgraph "EC2 — API Production"
  API_P["NestJS :3000"]
  REDIS_P["Redis :6379<br/>(Docker sidecar)"]
  end
- DB["MariaDB 10.11<br/>task_tracker_staging DB<br/>task_tracker_production DB"]
- GHCR_IMG["GHCR: ptt-api, ptt-frontend<br/>(staging + production tags)"]
+ RDS["RDS MariaDB 10.11<br/>db.t3.micro · 20GB gp2<br/>task_tracker_staging DB<br/>task_tracker_production DB"]
+ ECR_API["ECR: ptt-api<br/>(staging + production tags)"]
  end
 
- USER --> NG_FE_S
- USER --> NG_FE_P
+ USER --> CF_FE_S
+ USER --> CF_FE_P
 
- NG_FE_S --> FE_S
- NG_FE_P --> FE_P
+ CF_FE_S --> NGX_S
+ CF_FE_P --> NGX_P
 
- NG_API_S --> API_S
- NG_API_P --> API_P
+ NGX_S -->|"/ (pages)"| FE_S
+ NGX_S -->|"/tasks, /api/docs"| CF_API_S
+ NGX_P -->|"/ (pages)"| FE_P
+ NGX_P -->|"/tasks, /api/docs"| CF_API_P
+
+ CF_API_S --> API_S
+ CF_API_P --> API_P
 
  API_S --> REDIS_S
- API_S --> DB
+ API_S --> RDS
  API_P --> REDIS_P
- API_P --> DB
+ API_P --> RDS
 
  style USER fill:#f59e0b,color:#000
- style NG_FE_S fill:#7c3aed,color:#fff
- style NG_FE_P fill:#7c3aed,color:#fff
- style NG_API_S fill:#7c3aed,color:#fff
- style NG_API_P fill:#7c3aed,color:#fff
- style DB fill:#2563eb,color:#fff
- style GHCR_IMG fill:#64748b,color:#fff
+ style CF_FE_S fill:#7c3aed,color:#fff
+ style CF_FE_P fill:#7c3aed,color:#fff
+ style CF_API_S fill:#7c3aed,color:#fff
+ style CF_API_P fill:#7c3aed,color:#fff
+ style RDS fill:#2563eb,color:#fff
+ style ECR_FE fill:#64748b,color:#fff
+ style ECR_API fill:#64748b,color:#fff
 ```
 
 ### How Requests Flow Through the Infrastructure
 
-1. **User visits** `https://nurulizyansyaza.com/personal-task-tracker` (production frontend)
-2. **Nginx** reverse proxy terminates HTTPS and routes to the Frontend container
-3. **Next.js** serves the app for page requests (`/`)
+1. **User visits** `https://d1w6dngwkrqpvq.cloudfront.net` (production frontend)
+2. **CloudFront** routes to the Frontend EC2 in us-east-1
+3. **Nginx** on the EC2 serves the Next.js app for page requests (`/`)
 4. **Browser JavaScript** makes API calls to the same origin (`/tasks`)
-5. **Nginx** proxies `/tasks` and `/api/docs` to the API container (`http://api:3000`)
-6. **NestJS** processes the request and queries **MariaDB** (same machine = low latency)
+5. **Nginx** proxies `/tasks` and `/api/docs` to the API CloudFront (`d270j9db8ffegc.cloudfront.net`)
+6. **API CloudFront** routes to the API EC2 in ap-southeast-1
+7. **NestJS** processes the request and queries **RDS MariaDB** (same region = low latency)
 
 ### Why This Design?
 
-- **Single server**: All containers co-located for minimal inter-service latency
-- **Docker network isolation**: Staging and production stacks run in separate Docker networks
-- **Same-origin API calls**: The browser talks to the frontend domain for everything — Nginx handles the routing to the API container transparently. This avoids CORS complexity for the end user.
+- **API in ap-southeast-1**: Co-located with the database for minimal query latency
+- **Frontend in us-east-1**: CloudFront edge optimisation is strongest from US regions
+- **Same-origin API calls**: The browser talks to the frontend CloudFront URL for everything — Nginx handles the cross-region routing transparently. This avoids CORS complexity for the end user.
 
-### Nginx Reverse Proxy Configuration
+### CloudFront Configuration
 
-| Virtual Host | Domain | Upstream | Notes |
+| Distribution | Domain | Origin | Caching |
 |---|---|---|---|
-| Frontend Staging | `/staging/personal-task-tracker/` | Frontend container :3001 | Proxies to Next.js standalone |
-| Frontend Production | `/personal-task-tracker/` | Frontend container :3001 | Proxies to Next.js standalone |
-| API Staging | `/staging/personal-task-tracker/api/` | API container :3000 | All HTTP methods forwarded |
-| API Production | `/personal-task-tracker/api/` | API container :3000 | All HTTP methods forwarded |
+| Frontend Staging | `d179mmtd1r518i.cloudfront.net` | EC2 :80 (us-east-1) | Standard (static assets cached) |
+| Frontend Production | `d1w6dngwkrqpvq.cloudfront.net` | EC2 :80 (us-east-1) | Standard |
+| API Staging | `diofa9vowlzj6.cloudfront.net` | EC2 :3000 (ap-southeast-1) | **Disabled** — all HTTP methods forwarded |
+| API Production | `d270j9db8ffegc.cloudfront.net` | EC2 :3000 (ap-southeast-1) | **Disabled** — all HTTP methods forwarded |
 
-> **Important:** Nginx handles HTTPS termination via Let's Encrypt certificates. API proxying forwards all HTTP methods (GET, POST, PUT, DELETE) directly to the API container.
+> **Important:** API CloudFront distributions have caching disabled and allow POST/PUT/DELETE methods to pass through. They act purely as a secure tunnel (HTTPS termination + IP hiding).
 
 ---
 
@@ -473,10 +495,10 @@ sequenceDiagram
  participant SubGHA as Sub-repo<br/>GitHub Actions
  participant Orch as Orchestration Repo<br/>(personal-task-tracker)
  participant OrchGHA as Orchestration<br/>GitHub Actions
- participant GHCR as GHCR<br/>(ghcr.io)
-
- participant HL as Homelab Server
-
+ participant ECR_API as ECR ptt-api<br/>(ap-southeast-1)
+ participant ECR_FE as ECR ptt-frontend<br/>(us-east-1)
+ participant EC2_API as EC2 API<br/>(ap-southeast-1)
+ participant EC2_FE as EC2 Frontend<br/>(us-east-1)
 
  Dev->>Sub: Push to main branch
  Sub->>SubGHA: Triggers CI workflow
@@ -484,7 +506,7 @@ sequenceDiagram
  SubGHA->>Orch: Push empty commit to staging + main branches<br/>(using DOCKER_REPO_PAT)
 
  rect rgb(200, 220, 255)
- Note over OrchGHA,HL: Staging Auto-Deploy (triggered by push to staging branch)
+ Note over OrchGHA,EC2_FE: Staging Auto-Deploy (triggered by push to staging branch)
  Orch->>OrchGHA: staging branch push detected
  OrchGHA->>OrchGHA: Checkout all 4 repos
  OrchGHA->>OrchGHA: npm ci && npm run build (core)
@@ -492,18 +514,22 @@ sequenceDiagram
  OrchGHA->>OrchGHA: Fix file: paths with sed
  OrchGHA->>OrchGHA: docker build ptt-api:staging
  OrchGHA->>OrchGHA: docker build ptt-frontend:staging<br/>(with NEXT_PUBLIC_API_URL build arg)
- OrchGHA->>GHCR: docker push ptt-api:staging + ptt-frontend:staging
- OrchGHA->>HL: SSH → docker compose pull && up -d
+ OrchGHA->>ECR_API: docker push ptt-api:staging
+ OrchGHA->>ECR_FE: docker push ptt-frontend:staging
+ OrchGHA->>EC2_API: SSH → docker compose pull && up -d
+ OrchGHA->>EC2_FE: SSH → docker compose pull && up -d
  end
 
  Dev->>Orch: Manual workflow_dispatch (type "deploy")
 
  rect rgb(255, 220, 200)
- Note over OrchGHA,HL: Production Manual Deploy (requires confirmation)
+ Note over OrchGHA,EC2_FE: Production Manual Deploy (requires confirmation)
  Orch->>OrchGHA: workflow_dispatch on main branch
  OrchGHA->>OrchGHA: Same build steps as staging
- OrchGHA->>GHCR: docker push ptt-api:production + ptt-frontend:production
- OrchGHA->>HL: SSH → docker compose pull && up -d
+ OrchGHA->>ECR_API: docker push ptt-api:production
+ OrchGHA->>ECR_FE: docker push ptt-frontend:production
+ OrchGHA->>EC2_API: SSH → docker compose pull && up -d
+ OrchGHA->>EC2_FE: SSH → docker compose pull && up -d
  end
 ```
 
@@ -516,12 +542,12 @@ graph LR
  A["1. Checkout<br/>All 4 repos"] --> B["2. Build Core<br/>npm ci + build"]
  B --> C["3. Copy Core<br/>into API + FE dirs"]
  C --> D["4. Fix Paths<br/>sed file: refs"]
- D --> E["5. GHCR Login"]
+ D --> E["5. ECR Login<br/>Both regions"]
  E --> F["6. Docker Build<br/>API image"]
  F --> G["7. Docker Build<br/>Frontend image"]
- G --> H["8. Push to GHCR"]
- H --> I["9. SSH Deploy<br/>Homelab"]
-
+ G --> H["8. Push to ECR<br/>Both regions"]
+ H --> I["9. SSH Deploy<br/>API EC2"]
+ I --> J["10. SSH Deploy<br/>Frontend EC2"]
 
  style A fill:#6366f1,color:#fff
  style B fill:#6366f1,color:#fff
@@ -572,7 +598,7 @@ graph LR
 | Layer | What It Does |
 |---|---|
 | **Helmet** | Sets security HTTP headers (X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security, etc.) |
-| **CORS** | Only allows requests from the configured frontend domain (`CORS_ORIGIN` env var) |
+| **CORS** | Only allows requests from the configured frontend CloudFront domain (`CORS_ORIGIN` env var) |
 | **Rate Limiting** | Three tiers to prevent abuse — see table below |
 | **ValidationPipe** | Validates and transforms request bodies using class-validator decorators on DTOs. Strips unknown fields (`whitelist: true`). |
 | **AllExceptionsFilter** | Catches all uncaught exceptions and returns a standardised error response. Never leaks stack traces. |
@@ -590,27 +616,27 @@ graph LR
 
 ```mermaid
 graph TB
- INET["Internet"] --> NGX["Nginx<br/>(HTTPS termination)"]
-
+ INET["Internet"] --> CF["CloudFront<br/>(HTTPS termination)"]
+ 
  subgraph "Security Boundary"
- NGX --> UFW["UFW Firewall<br/>Port 80/443: Open<br/>Port 22: SSH"]
- UFW --> DOCKER["Docker Network<br/>Internal container communication"]
- DOCKER --> DB["MariaDB<br/>Port 3306: Docker network ONLY"]
+ CF --> SG_FE["Security Group: ptt-frontend-sg<br/>Port 80: CloudFront prefix list ONLY<br/>Port 22: SSH"]
+ CF --> SG_API["Security Group: ptt-api-sg<br/>Port 3000: CloudFront prefix list ONLY<br/>Port 22: SSH"]
+ SG_API --> SG_RDS["Security Group: ptt-rds-sg<br/>Port 3306: ptt-api-sg ONLY"]
  end
 
- style NGX fill:#7c3aed,color:#fff
- style UFW fill:#dc2626,color:#fff
- style DOCKER fill:#dc2626,color:#fff
- style DB fill:#dc2626,color:#fff
+ style CF fill:#7c3aed,color:#fff
+ style SG_FE fill:#dc2626,color:#fff
+ style SG_API fill:#dc2626,color:#fff
+ style SG_RDS fill:#dc2626,color:#fff
 ```
 
 **Key infrastructure security measures:**
 
 | Measure | Detail |
 |---|---|
-| **No direct container exposure** | Docker containers are only reachable through Nginx reverse proxy. UFW firewall restricts inbound traffic to ports 80, 443, and 22. |
-| **HTTPS everywhere** | Nginx terminates TLS via Let\'s Encrypt certificates. All browser ↔ server traffic is encrypted. |
-| **Database isolation** | MariaDB container is only accessible within the Docker network — no direct internet access. |
+| **No public IP exposure** | EC2 instances are only reachable through CloudFront. Security groups use AWS-managed CloudFront prefix lists (`pl-31a34658` in ap-southeast-1, `pl-3b927c52` in us-east-1). |
+| **HTTPS everywhere** | CloudFront terminates TLS. All browser ↔ CloudFront traffic is encrypted. Nginx ↔ API CloudFront proxy uses HTTPS with SNI. |
+| **Database isolation** | RDS security group only allows inbound from the API security group — no direct internet access. |
 | **Non-root containers** | Frontend Docker image runs as a dedicated `nextjs` user (not root). |
 | **No secrets in code** | All credentials stored in GitHub Secrets and injected via environment variables at deploy time. |
 
@@ -705,41 +731,42 @@ graph TB
 
 ### 9.2 Staging / Production Stack
 
-In staging and production, all containers run on the same homelab server:
+In staging and production, the API and Frontend run on separate EC2 instances in different regions:
 
 ```mermaid
 graph TB
- subgraph "Homelab Server"
+ subgraph "API EC2 (ap-southeast-1)"
  subgraph "docker-compose.api-staging.yml"
- API_S["ptt-api:staging<br/>(from GHCR)<br/>Port 3000"]
+ API_S["ptt-api:staging<br/>(from ECR)<br/>Port 3000"]
  REDIS_S["redis:7-alpine<br/>Port 6379"]
  end
-
- subgraph "docker-compose.frontend-staging.yml"
- FE_S["ptt-frontend:staging<br/>(from GHCR)<br/>Port 3001"]
  end
 
- subgraph "docker-compose.nginx.yml"
+ subgraph "Frontend EC2 (us-east-1)"
+ subgraph "docker-compose.frontend-staging.yml"
+ FE_S["ptt-frontend:staging<br/>(from ECR)<br/>Port 3001"]
  NGX_S["nginx:alpine<br/>Port 80<br/>envsubst template"]
  end
-
- DB["MariaDB 10.11<br/>(Docker container)"]
  end
 
- NG["Nginx Reverse Proxy<br/>(HTTPS termination)"]
+ RDS["RDS MariaDB<br/>(ap-southeast-1)"]
+ CF_API["CloudFront API<br/>diofa9vowlzj6.cloudfront.net"]
+ CF_FE["CloudFront Frontend<br/>d179mmtd1r518i.cloudfront.net"]
 
- NG --> NGX_S
+ CF_FE --> NGX_S
  NGX_S -->|"/"| FE_S
- NGX_S -->|"/tasks, /api/docs"| API_S
+ NGX_S -->|"/tasks, /api/docs"| CF_API
+ CF_API --> API_S
  API_S --> REDIS_S
- API_S --> DB
+ API_S --> RDS
 
  style API_S fill:#dc2626,color:#fff
  style FE_S fill:#2563eb,color:#fff
  style NGX_S fill:#059669,color:#fff
  style REDIS_S fill:#f59e0b,color:#000
- style DB fill:#6366f1,color:#fff
- style NG fill:#7c3aed,color:#fff
+ style RDS fill:#6366f1,color:#fff
+ style CF_API fill:#7c3aed,color:#fff
+ style CF_FE fill:#7c3aed,color:#fff
 ```
 
 ### 9.3 Multi-Stage Dockerfiles
@@ -782,20 +809,22 @@ upstream frontend { server frontend:3001; }
 
 server {
  listen 80;
- # Proxy to API container on same server (HTTP)
+ # Cross-region proxy to API via CloudFront (HTTPS + SNI)
  location /api/docs {
- proxy_pass http://${API_HOST}/api/docs;
+ proxy_pass https://${API_HOST}/api/docs;
  proxy_set_header Host ${API_HOST};
+ proxy_ssl_server_name on;
  }
  location /tasks {
- proxy_pass http://${API_HOST}/tasks;
+ proxy_pass https://${API_HOST}/tasks;
  proxy_set_header Host ${API_HOST};
+ proxy_ssl_server_name on;
  }
  location / { proxy_pass http://frontend; }
 }
 ```
 
-The `${API_HOST}` variable is replaced at container startup using Nginx's built-in `envsubst` support. For staging, `API_HOST=api-staging:3000`; for production, `API_HOST=api-production:3000`.
+The `${API_HOST}` variable is replaced at container startup using Nginx's built-in `envsubst` support. For staging, `API_HOST=diofa9vowlzj6.cloudfront.net`; for production, `API_HOST=d270j9db8ffegc.cloudfront.net`.
 
 ---
 
@@ -903,8 +932,8 @@ Interactive API docs are available at:
 | Environment | URL |
 |---|---|
 | Local | http://localhost:3000/api/docs |
-| Staging | https://nurulizyansyaza.com/staging/personal-task-tracker/api/docs |
-| Production | https://nurulizyansyaza.com/personal-task-tracker/api/docs |
+| Staging | https://diofa9vowlzj6.cloudfront.net/api/docs |
+| Production | https://d270j9db8ffegc.cloudfront.net/api/docs |
 
 ### Task Entity
 
@@ -932,18 +961,20 @@ DB_DATABASE=task_tracker
 ### 12.2 API Staging/Production (`.env.api.example`)
 
 ```env
-DB_HOST=mariadb
+AWS_ACCOUNT_ID=623756711231
+DB_HOST=<your-rds-endpoint>.rds.amazonaws.com
 DB_USERNAME=taskuser
 DB_PASSWORD=<secure-password>
 DB_DATABASE=task_tracker_staging # or task_tracker_production
-CORS_ORIGIN=https://nurulizyansyaza.com # frontend domain
+CORS_ORIGIN=https://d179mmtd1r518i.cloudfront.net # frontend CloudFront domain
 ```
 
 ### 12.3 Frontend Staging/Production (`.env.frontend.example`)
 
 ```env
-NEXT_PUBLIC_API_URL=/staging/personal-task-tracker/api # subpath to API via Nginx
-API_HOST=api-staging:3000 # API container hostname (for Nginx proxy)
+AWS_ACCOUNT_ID=623756711231
+NEXT_PUBLIC_API_URL=https://d179mmtd1r518i.cloudfront.net # same as frontend CloudFront
+API_HOST=diofa9vowlzj6.cloudfront.net # API CloudFront (for Nginx proxy)
 ```
 
 ### Environment Variable Reference
@@ -952,7 +983,7 @@ API_HOST=api-staging:3000 # API container hostname (for Nginx proxy)
 |---|---|---|
 | `NODE_ENV` | API | `development`, `staging`, or `production` |
 | `PORT` | API | API server port (default: `3000`) |
-| `DB_HOST` | API | MariaDB container hostname |
+| `DB_HOST` | API | RDS MariaDB endpoint |
 | `DB_PORT` | API | MariaDB port (default: `3306`) |
 | `DB_USERNAME` | API | Database user |
 | `DB_PASSWORD` | API | Database password |
@@ -960,21 +991,26 @@ API_HOST=api-staging:3000 # API container hostname (for Nginx proxy)
 | `REDIS_HOST` | API | Redis hostname (default: `redis` in Docker) |
 | `REDIS_PORT` | API | Redis port (default: `6379`) |
 | `REDIS_TTL` | API | Cache TTL in seconds (default: `60`) |
-| `CORS_ORIGIN` | API | Allowed CORS origin (frontend URL) |
-| `NEXT_PUBLIC_API_URL` | Frontend | API base URL baked into the build (frontend URL for same-origin) |
-| `API_HOST` | Nginx | API container hostname for proxy |
-| `GHCR_TOKEN` | CI/CD | GitHub token for GHCR image push/pull |
+| `CORS_ORIGIN` | API | Allowed CORS origin (frontend CloudFront URL) |
+| `NEXT_PUBLIC_API_URL` | Frontend | API base URL baked into the build (frontend CloudFront URL for same-origin) |
+| `API_HOST` | Nginx | API CloudFront domain for cross-region proxy |
+| `AWS_ACCOUNT_ID` | CI/CD | AWS account for ECR image paths |
 
 ### GitHub Actions Secrets
 
 | Secret | Purpose |
 |---|---|
-| `GHCR_TOKEN` | GitHub Personal Access Token for GHCR image push/pull |
-| `HOMELAB_HOST` | IP address or hostname of the homelab server |
-| `HOMELAB_SSH_KEY` | SSH private key for homelab server access |
-| `HOMELAB_USER` | SSH username on the homelab server |
-| `STAGING_API_URL` | Staging frontend URL (baked into build) |
-| `PRODUCTION_API_URL` | Production frontend URL (baked into build) |
+| `AWS_ACCESS_KEY_ID` | IAM credentials for ECR push and EC2 deploy |
+| `AWS_SECRET_ACCESS_KEY` | IAM credentials |
+| `AWS_ACCOUNT_ID` | 12-digit AWS account ID |
+| `STAGING_API_EC2_HOST` | Staging API EC2 elastic IP |
+| `STAGING_FRONTEND_EC2_HOST` | Staging Frontend EC2 elastic IP |
+| `STAGING_EC2_SSH_KEY` | SSH private key for staging EC2 instances |
+| `STAGING_API_URL` | Staging frontend CloudFront URL (baked into build) |
+| `PRODUCTION_API_EC2_HOST` | Production API EC2 elastic IP |
+| `PRODUCTION_FRONTEND_EC2_HOST` | Production Frontend EC2 elastic IP |
+| `PRODUCTION_EC2_SSH_KEY` | SSH private key for production EC2 instances |
+| `PRODUCTION_API_URL` | Production frontend CloudFront URL (baked into build) |
 | `DOCKER_REPO_PAT` | GitHub PAT for sub-repos to push to orchestration repo |
 
 ---

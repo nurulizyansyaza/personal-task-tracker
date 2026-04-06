@@ -1,7 +1,7 @@
 # ============================================
-# Production: Manual Deploy (Homelab)
+# Production: Manual Deploy (Multi-Region)
 # ============================================
-# Builds Docker images, pushes to GHCR, deploys to homelab via SSH
+# API → ap-southeast-1, Frontend → us-east-1
 
 name: Deploy to Production
 
@@ -14,9 +14,11 @@ on:
         type: string
 
 env:
-  REGISTRY: ghcr.io
-  API_IMAGE: ghcr.io/nurulizyansyaza/ptt-api
-  FRONTEND_IMAGE: ghcr.io/nurulizyansyaza/ptt-frontend
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  API_REGION: ap-southeast-1
+  FRONTEND_REGION: us-east-1
+  ECR_API_REPO: ptt-api
+  ECR_FRONTEND_REPO: ptt-frontend
 
 jobs:
   validate:
@@ -31,9 +33,6 @@ jobs:
   build-and-deploy:
     needs: validate
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - name: Checkout Docker Repo
@@ -59,6 +58,13 @@ jobs:
           repository: nurulizyansyaza/personal-task-tracker-frontend
           path: personal-task-tracker-frontend
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.API_REGION }}
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -78,72 +84,53 @@ jobs:
           sed -i 's|file:../personal-task-tracker-core|file:./personal-task-tracker-core|' ../personal-task-tracker-api/package.json
           sed -i 's|file:../personal-task-tracker-core|file:./personal-task-tracker-core|' ../personal-task-tracker-frontend/package.json
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to ECR (both regions)
+        run: |
+          aws ecr get-login-password --region ${{ env.API_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.API_REGION }}.amazonaws.com
+          aws ecr get-login-password --region ${{ env.FRONTEND_REGION }} | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.FRONTEND_REGION }}.amazonaws.com
 
       - name: Build & Push API Image
         run: |
           cd personal-task-tracker-api
-          docker build -t ${{ env.API_IMAGE }}:production .
-          docker push ${{ env.API_IMAGE }}:production
+          docker build -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.API_REGION }}.amazonaws.com/${{ env.ECR_API_REPO }}:production .
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.API_REGION }}.amazonaws.com/${{ env.ECR_API_REPO }}:production
 
       - name: Build & Push Frontend Image
         run: |
           cd personal-task-tracker-frontend
           docker build \
             --build-arg NEXT_PUBLIC_API_URL=${{ secrets.PRODUCTION_API_URL }} \
-            --build-arg NEXT_PUBLIC_BASE_PATH=/personal-task-tracker \
-            -t ${{ env.FRONTEND_IMAGE }}:production .
-          docker push ${{ env.FRONTEND_IMAGE }}:production
+            -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.FRONTEND_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:production .
+          docker push ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.FRONTEND_REGION }}.amazonaws.com/${{ env.ECR_FRONTEND_REPO }}:production
 
-      - name: Deploy API to Homelab
+      - name: Deploy API to ap-southeast-1
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.PRODUCTION_HOMELAB_HOST }}
-          username: ${{ secrets.HOMELAB_USERNAME }}
-          key: ${{ secrets.PRODUCTION_HOMELAB_SSH_KEY }}
-          port: ${{ secrets.HOMELAB_SSH_PORT }}
+          host: ${{ secrets.PRODUCTION_API_EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.PRODUCTION_EC2_SSH_KEY }}
           script: |
-            cd ~/personal-task-tracker
+            cd /home/ec2-user/personal-task-tracker
 
-            echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            docker network create ptt-network 2>/dev/null || true
+            aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.ap-southeast-1.amazonaws.com
 
             docker compose -f docker-compose.api-production.yml pull
             docker compose -f docker-compose.api-production.yml up -d --remove-orphans
             docker image prune -f || true
 
-      - name: Deploy Frontend to Homelab
+      - name: Deploy Frontend to us-east-1
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.PRODUCTION_HOMELAB_HOST }}
-          username: ${{ secrets.HOMELAB_USERNAME }}
-          key: ${{ secrets.PRODUCTION_HOMELAB_SSH_KEY }}
-          port: ${{ secrets.HOMELAB_SSH_PORT }}
+          host: ${{ secrets.PRODUCTION_FRONTEND_EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.PRODUCTION_EC2_SSH_KEY }}
           script: |
-            cd ~/personal-task-tracker
+            cd /home/ec2-user/personal-task-tracker
 
-            echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
 
             docker compose -f docker-compose.frontend-production.yml pull
             docker compose -f docker-compose.frontend-production.yml up -d --remove-orphans
             docker image prune -f || true
-
-      - name: Deploy/Restart Nginx
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.PRODUCTION_HOMELAB_HOST }}
-          username: ${{ secrets.HOMELAB_USERNAME }}
-          key: ${{ secrets.PRODUCTION_HOMELAB_SSH_KEY }}
-          port: ${{ secrets.HOMELAB_SSH_PORT }}
-          script: |
-            cd ~/personal-task-tracker
-
-            docker compose -f docker-compose.nginx.yml up -d --remove-orphans
 
             echo "Production deployment complete!"

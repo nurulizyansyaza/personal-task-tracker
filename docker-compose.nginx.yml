@@ -1,0 +1,29 @@
+# ============================================
+# Shared Nginx Reverse Proxy - Homelab
+# ============================================
+# Single Nginx handles routing for both staging and production
+# via subpath prefixes on nurulizyansyaza.com.
+#
+# Production:  /personal-task-tracker/
+# Staging:     /staging/personal-task-tracker/
+#
+# Deploy once; re-deploy only when nginx config changes.
+# ============================================
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: ptt-nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      SERVER_NAME: ${SERVER_NAME:-nurulizyansyaza.com}
+    networks:
+      - ptt-network
+
+networks:
+  ptt-network:
+    external: true

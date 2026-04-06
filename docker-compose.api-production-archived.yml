@@ -1,10 +1,10 @@
 # ============================================
-# API Production - Homelab (nurulizyansyaza)
+# API Production - ap-southeast-1
 # ============================================
 # API + Redis only (split from frontend)
 # Differences from staging:
 #   - container names use "-production" suffix
-#   - GHCR image tag is "production"
+#   - ECR image tag is "production"
 #   - NODE_ENV is "production"
 #   - Redis has persistence (appendonly) and memory limits
 # ============================================
@@ -17,8 +17,6 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
-    networks:
-      - ptt-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -26,9 +24,11 @@ services:
       retries: 5
 
   api:
-    image: ghcr.io/nurulizyansyaza/ptt-api:production
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-southeast-1.amazonaws.com/ptt-api:production
     container_name: ptt-api-production
     restart: always
+    ports:
+      - "3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -40,15 +40,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN required}
-    networks:
-      - ptt-network
     depends_on:
       redis:
         condition: service_healthy
 
 volumes:
   redis_data:
-
-networks:
-  ptt-network:
-    external: true

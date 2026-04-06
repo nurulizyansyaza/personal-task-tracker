@@ -1,0 +1,29 @@
+# ============================================
+# Frontend Staging - us-east-1
+# ============================================
+# Frontend + Nginx (proxies API to ap-southeast-1)
+# Differences from production:
+#   - container names use "-staging" suffix
+#   - ECR image tag is "staging"
+# ============================================
+
+services:
+  frontend:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/ptt-frontend:staging
+    container_name: ptt-frontend-staging
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+
+  nginx:
+    image: nginx:alpine
+    container_name: ptt-nginx-staging
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      API_HOST: ${API_HOST:?API_HOST required}
+    depends_on:
+      - frontend
