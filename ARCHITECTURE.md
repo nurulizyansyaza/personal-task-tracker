@@ -389,11 +389,11 @@ graph TB
  USER["Browser"]
  end
 
- subgraph "Nginx Reverse Proxy (Let's Encrypt HTTPS)"
- NG_FE_S["nurulizyansyaza.com/staging/personal-task-tracker<br/>(Frontend Staging)"]
- NG_FE_P["nurulizyansyaza.com/personal-task-tracker<br/>(Frontend Production)"]
- NG_API_S["nurulizyansyaza.com/staging/personal-task-tracker/api<br/>(API Staging)"]
- NG_API_P["nurulizyansyaza.com/personal-task-tracker/api<br/>(API Production)"]
+ subgraph "Cloudflare Tunnel (Subdomain Routing)"
+ NG_FE_S["staging-ptt.nurulizyansyaza.com<br/>(Frontend Staging)"]
+ NG_FE_P["ptt.nurulizyansyaza.com<br/>(Frontend Production)"]
+ NG_API_S["staging-ptt.nurulizyansyaza.com/api<br/>(API Staging)"]
+ NG_API_P["ptt.nurulizyansyaza.com/api<br/>(API Production)"]
  end
 
  subgraph "Homelab Server — Docker Containers"
@@ -436,11 +436,11 @@ graph TB
 
 ### How Requests Flow Through the Infrastructure
 
-1. **User visits** `https://nurulizyansyaza.com/personal-task-tracker` (production frontend)
-2. **Nginx** reverse proxy terminates HTTPS and routes to the Frontend container
+1. **User visits** `https://ptt.nurulizyansyaza.com` (production frontend)
+2. **Cloudflare Tunnel** routes the subdomain to the Frontend container via subdomain routing
 3. **Next.js** serves the app for page requests (`/`)
 4. **Browser JavaScript** makes API calls to the same origin (`/tasks`)
-5. **Nginx** proxies `/tasks` and `/api/docs` to the API container (`http://api:3000`)
+5. **Cloudflare Tunnel** routes `/tasks` and `/api/docs` to the API container (`http://api:3000`)
 6. **NestJS** processes the request and queries **MariaDB** (same machine = low latency)
 
 ### Why This Design?
@@ -449,16 +449,16 @@ graph TB
 - **Docker network isolation**: Staging and production stacks run in separate Docker networks
 - **Same-origin API calls**: The browser talks to the frontend domain for everything — Nginx handles the routing to the API container transparently. This avoids CORS complexity for the end user.
 
-### Nginx Reverse Proxy Configuration
+### Cloudflare Tunnel Subdomain Routing
 
 | Virtual Host | Domain | Upstream | Notes |
 |---|---|---|---|
-| Frontend Staging | `/staging/personal-task-tracker/` | Frontend container :3001 | Proxies to Next.js standalone |
-| Frontend Production | `/personal-task-tracker/` | Frontend container :3001 | Proxies to Next.js standalone |
-| API Staging | `/staging/personal-task-tracker/api/` | API container :3000 | All HTTP methods forwarded |
-| API Production | `/personal-task-tracker/api/` | API container :3000 | All HTTP methods forwarded |
+| Frontend Staging | `staging-ptt.nurulizyansyaza.com` | Frontend container :3001 | Proxies to Next.js standalone |
+| Frontend Production | `ptt.nurulizyansyaza.com` | Frontend container :3001 | Proxies to Next.js standalone |
+| API Staging | `staging-ptt.nurulizyansyaza.com/api` | API container :3000 | All HTTP methods forwarded |
+| API Production | `ptt.nurulizyansyaza.com/api` | API container :3000 | All HTTP methods forwarded |
 
-> **Important:** Nginx handles HTTPS termination via Let's Encrypt certificates. API proxying forwards all HTTP methods (GET, POST, PUT, DELETE) directly to the API container.
+> **Important:** Cloudflare Tunnel handles HTTPS termination and subdomain routing. API proxying forwards all HTTP methods (GET, POST, PUT, DELETE) directly to the API container.
 
 ---
 
@@ -903,8 +903,8 @@ Interactive API docs are available at:
 | Environment | URL |
 |---|---|
 | Local | http://localhost:3000/api/docs |
-| Staging | https://nurulizyansyaza.com/staging/personal-task-tracker/api/docs |
-| Production | https://nurulizyansyaza.com/personal-task-tracker/api/docs |
+| Staging | https://staging-ptt.nurulizyansyaza.com/api/docs |
+| Production | https://ptt.nurulizyansyaza.com/api/docs |
 
 ### Task Entity
 
@@ -936,13 +936,13 @@ DB_HOST=mariadb
 DB_USERNAME=taskuser
 DB_PASSWORD=<secure-password>
 DB_DATABASE=task_tracker_staging # or task_tracker_production
-CORS_ORIGIN=https://nurulizyansyaza.com # frontend domain
+CORS_ORIGIN=https://ptt.nurulizyansyaza.com # frontend domain
 ```
 
 ### 12.3 Frontend Staging/Production (`.env.frontend.example`)
 
 ```env
-NEXT_PUBLIC_API_URL=/staging/personal-task-tracker/api # subpath to API via Nginx
+NEXT_PUBLIC_API_URL=/api # subdomain routing via Cloudflare Tunnel
 API_HOST=api-staging:3000 # API container hostname (for Nginx proxy)
 ```
 

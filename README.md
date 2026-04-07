@@ -135,7 +135,7 @@ graph TB
 | Homelab Server | Self-hosted Docker host (single machine) |
 | MariaDB (Docker) | Database running in Docker container |
 | GitHub Container Registry (GHCR) | Docker image registry |
-| Nginx + Let's Encrypt | Reverse proxy with HTTPS |
+| Nginx + Cloudflare Tunnel | Reverse proxy with HTTPS via Cloudflare Tunnel |
 | UFW Firewall | Host-level firewall rules |
 
 ---
@@ -343,8 +343,8 @@ The API includes interactive documentation powered by [Swagger / OpenAPI](https:
 |---|---|
 | **Local (Docker)** | [http://localhost:8080/api/docs](http://localhost:8080/api/docs) or [http://localhost:3100/api/docs](http://localhost:3100/api/docs) |
 | **Local (Manual)** | [http://localhost:3000/api/docs](http://localhost:3000/api/docs) |
-| **Staging** | `https://nurulizyansyaza.com/staging/personal-task-tracker/api/docs` |
-| **Production** | `https://nurulizyansyaza.com/personal-task-tracker/api/docs` |
+| **Staging** | `https://staging-ptt.nurulizyansyaza.com/api/docs` |
+| **Production** | `https://ptt.nurulizyansyaza.com/api/docs` |
 
 ### How to Use
 
@@ -383,8 +383,8 @@ The API repo includes a [Bruno](https://www.usebruno.com/) collection with **23 
 | Environment | Base URL | When to Use |
 |---|---|---|
 | **Local** | `http://localhost:3000` | Testing against your local dev server (use `http://localhost:3100` with Docker) |
-| **Staging** | `https://nurulizyansyaza.com/staging/personal-task-tracker` | Testing against the staging deployment |
-| **Production** | `https://nurulizyansyaza.com/personal-task-tracker` | Testing against the production deployment |
+| **Staging** | `https://staging-ptt.nurulizyansyaza.com` | Testing against the staging deployment |
+| **Production** | `https://ptt.nurulizyansyaza.com` | Testing against the production deployment |
 
 ### How to Use
 
@@ -599,7 +599,7 @@ sequenceDiagram
 
 ## Homelab Infrastructure
 
-The application runs on a **self-hosted homelab server** with Nginx as the reverse proxy:
+The application runs on a **self-hosted homelab server** with Cloudflare Tunnel for subdomain-based routing:
 
 ```mermaid
 graph TB
@@ -607,11 +607,11 @@ graph TB
  Browser["Browser"]
  end
 
- subgraph "Nginx Reverse Proxy (Let's Encrypt HTTPS)"
- NG_FE_S["Frontend Staging<br/>/staging/personal-task-tracker/"]
- NG_FE_P["Frontend Production<br/>/personal-task-tracker/"]
- NG_API_S["API Staging<br/>/staging/personal-task-tracker/api/"]
- NG_API_P["API Production<br/>/personal-task-tracker/api/"]
+ subgraph "Cloudflare Tunnel (HTTPS)"
+ NG_FE_S["Frontend Staging<br/>staging-ptt.nurulizyansyaza.com"]
+ NG_FE_P["Frontend Production<br/>ptt.nurulizyansyaza.com"]
+ NG_API_S["API Staging<br/>staging-ptt.nurulizyansyaza.com/api/"]
+ NG_API_P["API Production<br/>ptt.nurulizyansyaza.com/api/"]
  end
 
  subgraph "Homelab Server — Docker Containers"
@@ -648,7 +648,7 @@ graph TB
 | **MariaDB Database** | MariaDB 10.11 in Docker container. One instance, two databases (`task_tracker_staging`, `task_tracker_production`) |
 | **Redis** | Runs as a Docker sidecar alongside API containers (128MB max memory, LRU eviction) |
 | **GHCR Repositories** | `ghcr.io/nurulizyansyaza/ptt-api`, `ghcr.io/nurulizyansyaza/ptt-frontend` |
-| **Nginx + Let's Encrypt** | Reverse proxy providing HTTPS termination and routing to Docker containers |
+| **Nginx + Cloudflare Tunnel** | Nginx reverse proxy with Cloudflare Tunnel providing HTTPS termination and subdomain-based routing to Docker containers |
 | **UFW Firewall** | Ports 80/443 open for HTTP/HTTPS traffic. SSH open for management |
 | **SSH Key** | `personal-task-tracker-deploy` (used for SSH access to homelab server) |
 
@@ -656,9 +656,9 @@ graph TB
 
 - **All containers on one machine** — Simplifies networking, reduces latency between services, and eliminates cross-region costs
 - **Docker network isolation** — Staging and production stacks run in separate Docker networks on the same host
-- **Direct API access** — Nginx proxies `/tasks` and `/api/docs` directly to the API container on the same machine, eliminating cross-region hops
+- **Direct API access** — Nginx proxies `/tasks` and `/api/docs` directly to the API container on the same machine via subdomain-based routing, eliminating cross-region hops
 
-> For the complete setup guide (step-by-step homelab server, Docker, Nginx, and firewall configuration), see [HOMELAB-INFRASTRUCTURE.md](./HOMELAB-INFRASTRUCTURE.md).
+> For the complete setup guide (step-by-step homelab server, Docker, Nginx, Cloudflare Tunnel, and firewall configuration), see [HOMELAB-INFRASTRUCTURE.md](./HOMELAB-INFRASTRUCTURE.md).
 
 ---
 
@@ -674,8 +674,8 @@ These secrets must be configured in this repository's GitHub Settings → Secret
 | `HOMELAB_HOST` | IP address or hostname of the homelab server |
 | `HOMELAB_SSH_KEY` | SSH private key for homelab server access |
 | `HOMELAB_USER` | SSH username on the homelab server |
-| `STAGING_API_URL` | Staging API URL (e.g., `/staging/personal-task-tracker/api`) |
-| `PRODUCTION_API_URL` | Production API URL (e.g., `/personal-task-tracker/api`) |
+| `STAGING_API_URL` | Staging API URL (e.g., `/api`) |
+| `PRODUCTION_API_URL` | Production API URL (e.g., `/api`) |
 | `DOCKER_REPO_PAT` | GitHub Personal Access Token for syncing to this orchestration repo |
 
 ### Local Development (.env)
@@ -699,7 +699,7 @@ See `.env.api.example` for the template:
 | `DB_USERNAME` | Database username |
 | `DB_PASSWORD` | Database password |
 | `DB_DATABASE` | `task_tracker_staging` or `task_tracker_production` |
-| `CORS_ORIGIN` | Frontend URL (e.g., `https://nurulizyansyaza.com`) |
+| `CORS_ORIGIN` | Frontend URL (e.g., `https://ptt.nurulizyansyaza.com` or `https://staging-ptt.nurulizyansyaza.com`) |
 
 ### Homelab Frontend Instances (.env on server)
 
@@ -718,19 +718,19 @@ See `.env.frontend.example` for the template:
 
 | Service | URL |
 |---|---|
-| Frontend (Kanban Board) | `https://nurulizyansyaza.com/staging/personal-task-tracker` |
-| API | `https://nurulizyansyaza.com/staging/personal-task-tracker/api` |
-| Swagger API Docs | `https://nurulizyansyaza.com/staging/personal-task-tracker/api/docs` |
-| Health Check | `https://nurulizyansyaza.com/staging/personal-task-tracker/api/health` |
+| Frontend (Kanban Board) | `https://staging-ptt.nurulizyansyaza.com` |
+| API | `https://staging-ptt.nurulizyansyaza.com/api` |
+| Swagger API Docs | `https://staging-ptt.nurulizyansyaza.com/api/docs` |
+| Health Check | `https://staging-ptt.nurulizyansyaza.com/api/health` |
 
 ### Production
 
 | Service | URL |
 |---|---|
-| Frontend (Kanban Board) | `https://nurulizyansyaza.com/personal-task-tracker` |
-| API | `https://nurulizyansyaza.com/personal-task-tracker/api` |
-| Swagger API Docs | `https://nurulizyansyaza.com/personal-task-tracker/api/docs` |
-| Health Check | `https://nurulizyansyaza.com/personal-task-tracker/api/health` |
+| Frontend (Kanban Board) | `https://ptt.nurulizyansyaza.com` |
+| API | `https://ptt.nurulizyansyaza.com/api` |
+| Swagger API Docs | `https://ptt.nurulizyansyaza.com/api/docs` |
+| Health Check | `https://ptt.nurulizyansyaza.com/api/health` |
 
 ---
 
@@ -750,7 +750,7 @@ See `.env.frontend.example` for the template:
 - **Multi-repo over monorepo** — chose 4 separate repos (orchestration, core, API, frontend) to keep each concern isolated and independently deployable. Tradeoff: slightly more complex setup (clone 4 repos, `file:` dependency linking) but each repo has its own CI/CD, test suite, and clear boundaries.
 - **Shared core as `file:` dependency** — the core library is consumed via `file:../personal-task-tracker-core` in development and copied into Docker build contexts in CI. Tradeoff: no npm registry publishing overhead, but CI needs extra steps to clone and build core before building consumers.
 - **Single-server deployment** — All containers run on one homelab machine. Tradeoff: simpler networking and lower latency between services, but no geographic redundancy or CDN edge caching.
-- **Nginx reverse proxy over direct API calls** — Nginx proxies `/tasks` and `/api/docs` to the API container. Tradeoff: simpler CORS configuration (same-origin from the browser's perspective) but adds a proxy layer that must be configured correctly.
+- **Nginx reverse proxy over direct API calls** — Nginx proxies `/tasks` and `/api/docs` to the API container via subdomain-based routing through Cloudflare Tunnel. Tradeoff: simpler CORS configuration (same-origin from the browser's perspective) but adds a proxy layer that must be configured correctly.
 - **Docker Compose over Kubernetes** — used Docker Compose on homelab for simplicity. Tradeoff: easy to understand and debug, but no auto-scaling, self-healing, or rolling deployments. Suitable for a personal project, not for high-availability production.
 - **TypeORM `synchronize: true`** — auto-syncs entity schema to the database. Tradeoff: fast iteration during development but dangerous for production (can drop columns/data). Should be replaced with migration scripts for a real production system.
 - **Manual production deploy, auto staging** — staging auto-deploys on push to the `staging` branch; production requires a manual `workflow_dispatch` with a confirmation input. Tradeoff: prevents accidental production deployments but requires an extra manual step.
@@ -758,7 +758,7 @@ See `.env.frontend.example` for the template:
 ### What I Would Do Next With More Time
 
 - **Add end-to-end tests** — Playwright tests covering the full flow from creating a task to dragging it across columns.
-- **Custom domain** — set up a custom domain with Let's Encrypt certificates and DNS configuration.
+- ~~**Custom domain** — set up a custom domain with Let's Encrypt certificates and DNS configuration.~~ ✅ Done — now using subdomain-based routing via Cloudflare Tunnel (`ptt.nurulizyansyaza.com` / `staging-ptt.nurulizyansyaza.com`)
 - **Add monitoring** — Prometheus + Grafana dashboards and alerting for API performance visibility.
 - **Database migrations** — switch from TypeORM `synchronize: true` to proper migration scripts with version control.
 - **User authentication** — add JWT-based auth for the API and a login flow in the frontend for multi-user support.

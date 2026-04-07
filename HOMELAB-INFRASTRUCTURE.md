@@ -2,8 +2,9 @@
 
 This guide walks through every resource used by Personal Task Tracker on a self-hosted
 homelab server, how the pieces fit together, and how to recreate the infrastructure from
-scratch. The project runs on a single machine using Docker containers with Nginx
-providing HTTPS termination and reverse proxying via Let's Encrypt SSL certificates.
+scratch. The project runs on a single machine using Docker containers with host Nginx
+as a reverse proxy behind a **Cloudflare Tunnel** that provides end-to-end encryption
+and subdomain routing.
 
 ---
 
@@ -24,48 +25,58 @@ providing HTTPS termination and reverse proxying via Let's Encrypt SSL certifica
 
 ## Architecture Overview
 
-The API, frontend, database, and Redis all run on a **single homelab server**. Nginx
-acts as the public-facing reverse proxy, terminating HTTPS with Let's Encrypt
-certificates and routing traffic to the appropriate Docker container. Every request
-enters through Nginx so that application containers are never directly exposed to the
-internet.
+The API, frontend, database, and Redis all run on a **single homelab server**. A
+**Cloudflare Tunnel** connects the server to Cloudflare's edge network, which handles
+SSL/TLS termination and routes traffic to dedicated subdomains. Host Nginx listens on
+port 80 and uses `server_name` directives to route each subdomain to the appropriate
+Docker container. Application containers are never directly exposed to the internet.
 
 ```mermaid
 graph TB
-    subgraph "Public Edge — Nginx Reverse Proxy (nurulizyansyaza.com)"
-        NG_FE_S["Frontend Staging\n/staging/personal-task-tracker/"]
-        NG_FE_P["Frontend Production\n/personal-task-tracker/"]
-        NG_API_S["API Staging\n/staging/personal-task-tracker/api/"]
-        NG_API_P["API Production\n/personal-task-tracker/api/"]
+    subgraph "Cloudflare Edge — SSL/TLS Termination"
+        CF_P["ptt.nurulizyansyaza.com"]
+        CF_S["staging-ptt.nurulizyansyaza.com"]
+    end
+
+    subgraph "Cloudflare Tunnel (cloudflared)"
+        TUNNEL["cloudflared → http://localhost:80"]
+    end
+
+    subgraph "Host Nginx Reverse Proxy (port 80)"
+        NG_P["server_name ptt.nurulizyansyaza.com"]
+        NG_S["server_name staging-ptt.nurulizyansyaza.com"]
     end
 
     subgraph "Homelab Server — nurulizyansyaza Homelab"
-        subgraph "Frontend Containers"
-            FE_S_APP["Next.js Staging :3011"]
-            FE_P_APP["Next.js Production :3001"]
-        end
-        subgraph "API Containers"
-            API_S_APP["NestJS Staging :3010"]
-            API_S_REDIS["Redis Staging :6380"]
-            API_P_APP["NestJS Production :3000"]
+        subgraph "Production Containers"
+            FE_P_APP["Next.js Production :3201"]
+            API_P_APP["NestJS Production :3200"]
             API_P_REDIS["Redis Production :6379"]
         end
-        subgraph "Database Container"
-            MARIADB["MariaDB 10.11\ntask_tracker_staging\ntask_tracker_production"]
+        subgraph "Staging Containers"
+            FE_S_APP["Next.js Staging :3101"]
+            API_S_APP["NestJS Staging :3100"]
+            API_S_REDIS["Redis Staging :6380"]
         end
-        UFW["UFW Firewall\nPorts 80, 443, 22"]
+        subgraph "Database Container"
+            MARIADB["MariaDB 10.11\nptt-mariadb :3306\ntask_tracker_staging\ntask_tracker_production"]
+        end
     end
 
-    NG_FE_S -->|"HTTPS :443"| UFW --> FE_S_APP
-    NG_FE_P -->|"HTTPS :443"| UFW --> FE_P_APP
-    NG_API_S -->|"HTTPS :443"| UFW --> API_S_APP
-    NG_API_P -->|"HTTPS :443"| UFW --> API_P_APP
-    FE_S_APP -->|"/tasks, /api/docs"| API_S_APP
+    CF_P -->|"HTTPS"| TUNNEL
+    CF_S -->|"HTTPS"| TUNNEL
+    TUNNEL --> NG_P
+    TUNNEL --> NG_S
+    NG_P -->|"proxy_pass :3201"| FE_P_APP
+    NG_P -->|"proxy_pass :3200"| API_P_APP
+    NG_S -->|"proxy_pass :3101"| FE_S_APP
+    NG_S -->|"proxy_pass :3100"| API_S_APP
     FE_P_APP -->|"/tasks, /api/docs"| API_P_APP
-    API_S_APP --> API_S_REDIS
+    FE_S_APP -->|"/tasks, /api/docs"| API_S_APP
     API_P_APP --> API_P_REDIS
-    API_S_APP --> MARIADB
+    API_S_APP --> API_S_REDIS
     API_P_APP --> MARIADB
+    API_S_APP --> MARIADB
 ```
 
 ---
@@ -74,26 +85,33 @@ graph TB
 
 When a user opens the application in a browser, two types of request happen. The
 first loads the page itself. The second fetches task data from the API. Both go
-through Nginx, but the API request takes an extra hop through the frontend's Nginx
-server block so that browser same-origin restrictions are satisfied.
+through Cloudflare and the host Nginx, but the API request takes an extra hop
+through the frontend's Nginx server block so that browser same-origin restrictions
+are satisfied.
 
 ```mermaid
 sequenceDiagram
     participant Browser
-    participant Nginx as Nginx (HTTPS :443)
-    participant NextJS as Next.js (:3001)
-    participant API as NestJS (:3000)
+    participant CF as Cloudflare Edge (HTTPS)
+    participant Tunnel as cloudflared
+    participant Nginx as Host Nginx (:80)
+    participant NextJS as Next.js (:3201)
+    participant API as NestJS (:3200)
     participant Redis as Redis (:6379)
     participant DB as MariaDB (:3306)
 
     Note over Browser,DB: Page load
-    Browser->>Nginx: GET https://nurulizyansyaza.com/personal-task-tracker/
-    Nginx->>NextJS: proxy_pass to localhost:3001
+    Browser->>CF: GET https://ptt.nurulizyansyaza.com/
+    CF->>Tunnel: Route via tunnel
+    Tunnel->>Nginx: http://localhost:80
+    Nginx->>NextJS: proxy_pass to 127.0.0.1:3201
     NextJS-->>Browser: HTML page
 
     Note over Browser,DB: API call (same origin, proxied by Nginx)
-    Browser->>Nginx: GET /tasks
-    Nginx->>API: proxy_pass to localhost:3000
+    Browser->>CF: GET https://ptt.nurulizyansyaza.com/tasks
+    CF->>Tunnel: Route via tunnel
+    Tunnel->>Nginx: http://localhost:80
+    Nginx->>API: proxy_pass to 127.0.0.1:3200
     API->>Redis: Check cache
     Redis-->>API: Cache miss
     API->>DB: SELECT * FROM tasks
@@ -119,18 +137,18 @@ so that `docker login` to GHCR works during deployment.
 
 ### Nginx Reverse Proxy
 
-| Environment | Subpath | Origin | SSL |
+| Environment | Subdomain | Upstream | SSL |
 |---|---|---|---|
-| API Staging | /staging/personal-task-tracker/api/ | ptt-api-staging:3000 | Let's Encrypt |
-| API Production | /personal-task-tracker/api/ | ptt-api-production:3000 | Let's Encrypt |
-| Frontend Staging | /staging/personal-task-tracker/ | ptt-frontend-staging:3001 | Let's Encrypt |
-| Frontend Production | /personal-task-tracker/ | ptt-frontend-production:3001 | Let's Encrypt |
+| API Staging | staging-ptt.nurulizyansyaza.com | 127.0.0.1:3100 | Cloudflare (tunnel) |
+| API Production | ptt.nurulizyansyaza.com | 127.0.0.1:3200 | Cloudflare (tunnel) |
+| Frontend Staging | staging-ptt.nurulizyansyaza.com | 127.0.0.1:3101 | Cloudflare (tunnel) |
+| Frontend Production | ptt.nurulizyansyaza.com | 127.0.0.1:3201 | Cloudflare (tunnel) |
 
-> **Note:** All services are served under `nurulizyansyaza.com` using subpath routing
-> in a single Nginx server block. Nginx proxies each location to the corresponding
-> Docker container by name over the shared `ptt-network`. Container names are used
-> instead of `localhost` ports so that Nginx (running in Docker or on the host with
-> access to the Docker network) can resolve them reliably.
+> **Note:** Each environment is served on its own subdomain. Host Nginx listens on
+> port 80 and uses `server_name` to route traffic to the correct Docker containers
+> via `proxy_pass` to localhost ports. Cloudflare Tunnel terminates TLS at
+> Cloudflare's edge and forwards traffic to the local Nginx over the tunnel. The
+> Nginx config file is at `/etc/nginx/sites-available/ptt.nurulizyansyaza.com`.
 
 ### Database
 
@@ -150,9 +168,12 @@ production, port 6380 for staging). There is no managed Redis cluster.
 | Rule | Direction | Ports | Source |
 |---|---|---|---|
 | SSH | Inbound | TCP 22 | Your admin IP or 0.0.0.0/0 |
-| HTTP | Inbound | TCP 80 | 0.0.0.0/0 (redirects to HTTPS) |
-| HTTPS | Inbound | TCP 443 | 0.0.0.0/0 |
 | Default | Inbound | All other | Deny |
+
+> **Note:** Ports 80 and 443 do **not** need to be open to the public internet.
+> Cloudflare Tunnel uses an outbound connection from `cloudflared` to Cloudflare's
+> edge, so no inbound ports are required for web traffic. Nginx listens on port 80
+> only for the local `cloudflared` daemon connecting via `localhost`.
 
 ### Container Registry
 
@@ -169,18 +190,18 @@ production, port 6380 for staging). There is no managed Redis cluster.
 
 | Layer | Mechanism | Description |
 |---|---|---|
-| HTTPS termination | Nginx + Let's Encrypt | All traffic is encrypted between the browser and Nginx |
-| CORS | NestJS middleware | Only the frontend domain is allowed as an origin |
+| HTTPS termination | Cloudflare Tunnel | All traffic is encrypted between the browser and Cloudflare's edge; the tunnel provides end-to-end encryption to the homelab server |
+| CORS | NestJS middleware | Only the frontend subdomain is allowed as an origin |
 | API proxy | Nginx reverse proxy | The browser never contacts the API directly; Nginx forwards /tasks and /api/docs to the API container over localhost |
 | Database credentials | Environment files | Stored in .env on the server, never committed to source control |
-| Build-time variables | NEXT_PUBLIC_API_URL | Baked into the Next.js build so the browser requests the same origin and Nginx handles proxying |
+| Build-time variables | NEXT_PUBLIC_API_URL | Baked into the Next.js build so the browser requests the same subdomain origin and Nginx handles proxying |
 
 ### Infrastructure Layer
 
 | Layer | Mechanism | Description |
 |---|---|---|
-| Network isolation | UFW firewall | Only ports 80, 443, and 22 are open; all application ports are bound to localhost only |
-| Database network isolation | Docker network | MariaDB listens only on the internal Docker network; it is not exposed to the host or public internet |
+| Network isolation | UFW firewall | Only port 22 is open to the public; all application ports are bound to localhost only. Cloudflare Tunnel connects outbound so no inbound web ports are needed |
+| Database network isolation | Docker network | MariaDB listens only on 127.0.0.1:3306; it is not exposed to the public internet |
 | SSH access | Key pair authentication | The server uses an SSH key pair; password authentication is disabled |
 | Container isolation | Docker networks | API and frontend containers communicate with MariaDB and Redis through a private Docker bridge network |
 | Secrets management | GitHub Actions encrypted secrets | SSH keys and GHCR tokens are stored as repository secrets, never exposed in logs |
@@ -196,7 +217,7 @@ production, port 6380 for staging). There is no managed Redis cluster.
 | Docker | 20.x or later | `docker --version` | [Docker install guide](https://docs.docker.com/engine/install/ubuntu/) |
 | Docker Compose | 2.x or later | `docker compose version` | Included with Docker Engine (plugin) |
 | SSH client | any | `ssh -V` | Included with macOS and most Linux distributions |
-| Certbot | any | `certbot --version` | [Certbot install guide](https://certbot.eff.org/) |
+| cloudflared | any | `cloudflared --version` | [Cloudflare Tunnel install guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) |
 
 Make sure you have SSH access to your homelab server and that your user has
 permission to run Docker commands:
