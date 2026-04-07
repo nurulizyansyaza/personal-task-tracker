@@ -154,8 +154,8 @@ so that `docker login` to GHCR works during deployment.
 
 | Resource | Details |
 |---|---|
-| MariaDB Container | MariaDB 10.11, Docker container, 20 GB volume |
-| Hostname | mariadb (Docker network alias) or localhost:3306 |
+| MariaDB Container | MariaDB 10.11, Docker container `ptt-mariadb`, 20 GB volume |
+| Hostname | 127.0.0.1:3306 (bound to localhost only) |
 | Staging Database | task_tracker_staging |
 | Production Database | task_tracker_production |
 | Application User | taskuser (full privileges on both databases) |
@@ -296,19 +296,12 @@ ssh -i ~/.ssh/personal-task-tracker-deploy your-user@your-homelab-ip
 sudo ufw default deny incoming
 
 # Set the default policy to allow all outgoing traffic.
+# Cloudflare Tunnel uses outbound connections, so outgoing must be allowed.
 sudo ufw default allow outgoing
 
 # Allow SSH so you can connect for administration.
 # IMPORTANT: Do this BEFORE enabling UFW or you will lock yourself out.
 sudo ufw allow 22/tcp
-
-# Allow HTTP traffic (port 80).
-# Nginx will redirect all HTTP requests to HTTPS.
-sudo ufw allow 80/tcp
-
-# Allow HTTPS traffic (port 443).
-# This is the main entry point for all application traffic.
-sudo ufw allow 443/tcp
 ```
 
 You should see:
@@ -317,6 +310,11 @@ You should see:
 Rules updated
 Rules updated (v6)
 ```
+
+> **Note:** Ports 80 and 443 do **not** need to be opened to the public internet.
+> Cloudflare Tunnel initiates an outbound connection from `cloudflared` to
+> Cloudflare's edge network. Nginx listens on port 80 only for the local
+> `cloudflared` daemon connecting via `localhost`.
 
 ```bash
 # Enable the firewall.
@@ -337,11 +335,7 @@ Default: deny (incoming), allow (outgoing), disabled (routed)
 To                         Action      From
 --                         ------      ----
 22/tcp                     ALLOW IN    Anywhere
-80/tcp                     ALLOW IN    Anywhere
-443/tcp                    ALLOW IN    Anywhere
 22/tcp (v6)                ALLOW IN    Anywhere (v6)
-80/tcp (v6)                ALLOW IN    Anywhere (v6)
-443/tcp (v6)               ALLOW IN    Anywhere (v6)
 ```
 
 > **Tip:** For additional security, you can restrict SSH to your specific IP address:
@@ -544,7 +538,7 @@ services:
     container_name: ptt-api-production
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3200:3000"
     env_file:
       - .env.api.production
     networks:
@@ -566,7 +560,7 @@ services:
     container_name: ptt-frontend-production
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:3201:3001"
     env_file:
       - .env.frontend.production
     networks:
@@ -588,7 +582,7 @@ services:
     container_name: ptt-api-staging
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3010:3000"
+      - "127.0.0.1:3100:3000"
     env_file:
       - .env.api.staging
     networks:
@@ -610,7 +604,7 @@ services:
     container_name: ptt-frontend-staging
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3011:3001"
+      - "127.0.0.1:3101:3001"
     env_file:
       - .env.frontend.staging
     networks:
@@ -624,56 +618,90 @@ EOF
 
 ---
 
-### Step 6 -- Set Up Nginx with Let's Encrypt
+### Step 6 -- Set Up Cloudflare Tunnel
 
-Nginx provides HTTPS termination and protects application containers from direct
-access. Certbot automates certificate issuance and renewal through Let's Encrypt.
-
-```bash
-# Install Nginx and Certbot.
-sudo apt-get install -y nginx certbot python3-certbot-nginx
-
-# Enable Nginx on boot.
-sudo systemctl enable nginx
-```
-
-**Obtain SSL certificates for the domain:**
+Cloudflare Tunnel provides end-to-end encryption and routes traffic from
+Cloudflare's edge to the homelab server without opening any inbound ports. SSL/TLS
+is handled entirely by Cloudflare — there is no need for Let's Encrypt or certbot
+on the server.
 
 ```bash
-# Request a certificate for the domain.
-# Certbot will configure Nginx automatically with the --nginx flag.
-# Make sure your DNS records point to your homelab IP before running this.
-sudo certbot --nginx \
-  -d nurulizyansyaza.com \
-  --non-interactive \
-  --agree-tos \
-  -m your-email@example.com
+# Install cloudflared.
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb \
+  -o cloudflared.deb
+sudo dpkg -i cloudflared.deb
+rm cloudflared.deb
+
+# Authenticate cloudflared with your Cloudflare account.
+# This opens a browser window to complete the OAuth flow.
+cloudflared tunnel login
 ```
 
 You should see:
 
 ```
-Successfully received certificate.
-Certificate is saved at: /etc/letsencrypt/live/nurulizyansyaza.com/fullchain.pem
-Key is saved at:         /etc/letsencrypt/live/nurulizyansyaza.com/privkey.pem
+You have successfully logged in.
 ```
 
-**Verify automatic renewal is configured:**
+**Create the tunnel and configure DNS routes:**
 
 ```bash
-# Certbot installs a systemd timer for automatic renewal.
-# Certificates are renewed when they have less than 30 days until expiry.
-sudo systemctl status certbot.timer
+# Create a tunnel named "nurulizyansyaza".
+cloudflared tunnel create nurulizyansyaza
+
+# Add DNS routes for both subdomains.
+cloudflared tunnel route dns nurulizyansyaza ptt.nurulizyansyaza.com
+cloudflared tunnel route dns nurulizyansyaza staging-ptt.nurulizyansyaza.com
 ```
 
-You should see `active (waiting)` in the output.
+**Create the tunnel configuration file** (`/etc/cloudflared/config-nurulizyansyaza.yml`):
 
-> **Note:** Let's Encrypt certificates are valid for 90 days. Certbot automatically
-> renews them via the systemd timer. You can test renewal with:
-> ```bash
-> sudo certbot renew --dry-run
-> ```
-> You should see `Congratulations, all simulated renewals succeeded`.
+```bash
+sudo mkdir -p /etc/cloudflared
+
+sudo cat > /etc/cloudflared/config-nurulizyansyaza.yml << 'EOF'
+tunnel: <your-tunnel-id>
+credentials-file: /root/.cloudflared/<your-tunnel-id>.json
+
+ingress:
+  - hostname: ptt.nurulizyansyaza.com
+    service: http://localhost:80
+  - hostname: staging-ptt.nurulizyansyaza.com
+    service: http://localhost:80
+  - service: http_status:404
+EOF
+```
+
+**Install cloudflared as a system service:**
+
+```bash
+# Install the service using the config file.
+sudo cloudflared service install --config /etc/cloudflared/config-nurulizyansyaza.yml
+
+# Enable and start the service.
+sudo systemctl enable cloudflared
+sudo systemctl start cloudflared
+
+# Verify the tunnel is running.
+sudo systemctl status cloudflared
+```
+
+You should see `active (running)` in the output.
+
+> **Note:** Both subdomains route to `http://localhost:80` where host Nginx listens.
+> Nginx uses `server_name` to distinguish between production and staging traffic and
+> proxies to the correct containers. Cloudflare handles SSL/TLS termination at the
+> edge, so Nginx only needs to listen on port 80.
+
+**Install Nginx on the host:**
+
+```bash
+# Install Nginx.
+sudo apt-get install -y nginx
+
+# Enable Nginx on boot.
+sudo systemctl enable nginx
+```
 
 ---
 
@@ -693,7 +721,7 @@ DB_HOST=ptt-mariadb
 DB_USERNAME=taskuser
 DB_PASSWORD=<secure-password>
 DB_DATABASE=task_tracker_production
-CORS_ORIGIN=https://nurulizyansyaza.com
+CORS_ORIGIN=https://ptt.nurulizyansyaza.com
 REDIS_HOST=ptt-redis-production
 REDIS_PORT=6379
 EOF
@@ -707,7 +735,7 @@ DB_HOST=ptt-mariadb
 DB_USERNAME=taskuser
 DB_PASSWORD=<secure-password>
 DB_DATABASE=task_tracker_staging
-CORS_ORIGIN=https://nurulizyansyaza.com
+CORS_ORIGIN=https://staging-ptt.nurulizyansyaza.com
 REDIS_HOST=ptt-redis-staging
 REDIS_PORT=6379
 EOF
@@ -717,25 +745,27 @@ EOF
 
 ```bash
 cat > /home/your-user/personal-task-tracker/.env.frontend.production << 'EOF'
-NEXT_PUBLIC_API_URL=/personal-task-tracker/api
+NEXT_PUBLIC_API_URL=/api
 API_HOST=ptt-api-production:3000
 EOF
 ```
 
-For the frontend staging environment, set `NEXT_PUBLIC_API_URL` to
-`/staging/personal-task-tracker/api` and `API_HOST` to `ptt-api-staging:3000`.
+For the frontend staging environment, `NEXT_PUBLIC_API_URL` is also `/api` since
+each environment has its own subdomain. `API_HOST` points to the staging API
+container.
 
 ```bash
 cat > /home/your-user/personal-task-tracker/.env.frontend.staging << 'EOF'
-NEXT_PUBLIC_API_URL=/staging/personal-task-tracker/api
+NEXT_PUBLIC_API_URL=/api
 API_HOST=ptt-api-staging:3000
 EOF
 ```
 
-> **Note:** `NEXT_PUBLIC_API_URL` is a **relative subpath** (e.g., `/personal-task-tracker/api`),
-> not a full domain URL. The browser makes requests to the same origin it loaded the page from,
-> and Nginx routes the subpath to the correct API container. This variable is baked into
-> the Next.js build at build time and cannot be changed at runtime.
+> **Note:** `NEXT_PUBLIC_API_URL` is a **relative path** (e.g., `/api`), not a full
+> domain URL. Since each environment has its own subdomain, the browser makes requests
+> to the same subdomain origin it loaded the page from, and Nginx routes the path to
+> the correct API container. This variable is baked into the Next.js build at build
+> time and cannot be changed at runtime.
 
 > **Note:** `API_HOST` is the address of the API container as seen from the Docker network.
 > Since all containers share the `ptt-network`, Nginx and the frontend can reach the API
@@ -793,25 +823,24 @@ PONG
 
 ### Step 9 -- Configure Nginx Reverse Proxy
 
-Nginx runs on the homelab server and does three things for each environment: it
+Host Nginx runs on the homelab server and does three things for each environment: it
 serves the Next.js application, proxies `/tasks` to the API container, and proxies
-`/api/docs` to the API container. Since all containers run on localhost, no
-external HTTPS proxying is needed between services.
+`/api/docs` to the API container. Since Cloudflare Tunnel handles TLS, Nginx listens
+on port 80 and uses `server_name` to route between production and staging subdomains.
 
-Create a single Nginx configuration for `nurulizyansyaza.com` with subpath routing:
+Create the Nginx configuration at `/etc/nginx/sites-available/ptt.nurulizyansyaza.com`
+with two server blocks for subdomain routing:
 
 ```bash
-sudo cat > /etc/nginx/sites-available/nurulizyansyaza << 'NGINX'
+sudo cat > /etc/nginx/sites-available/ptt.nurulizyansyaza.com << 'NGINX'
+# Production — ptt.nurulizyansyaza.com
 server {
-    listen 443 ssl;
-    server_name nurulizyansyaza.com;
+    listen 80;
+    server_name ptt.nurulizyansyaza.com;
 
-    ssl_certificate /etc/letsencrypt/live/nurulizyansyaza.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/nurulizyansyaza.com/privkey.pem;
-
-    # Production API — /personal-task-tracker/api/
-    location /personal-task-tracker/api/ {
-        proxy_pass http://ptt-api-production:3000/;
+    # Production API — /api/
+    location /api/ {
+        proxy_pass http://127.0.0.1:3200/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -819,32 +848,9 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Production Frontend — /personal-task-tracker/
-    location /personal-task-tracker/ {
-        proxy_pass http://ptt-frontend-production:3001/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Staging API — /staging/personal-task-tracker/api/
-    location /staging/personal-task-tracker/api/ {
-        proxy_pass http://ptt-api-staging:3000/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # Staging Frontend — /staging/personal-task-tracker/
-    location /staging/personal-task-tracker/ {
-        proxy_pass http://ptt-frontend-staging:3001/;
+    # Production Frontend — /
+    location / {
+        proxy_pass http://127.0.0.1:3201/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -856,10 +862,33 @@ server {
     }
 }
 
+# Staging — staging-ptt.nurulizyansyaza.com
 server {
     listen 80;
-    server_name nurulizyansyaza.com;
-    return 301 https://$host$request_uri;
+    server_name staging-ptt.nurulizyansyaza.com;
+
+    # Staging API — /api/
+    location /api/ {
+        proxy_pass http://127.0.0.1:3100/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Staging Frontend — /
+    location / {
+        proxy_pass http://127.0.0.1:3101/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 }
 NGINX
 ```
@@ -868,7 +897,7 @@ Enable the site configuration and start Nginx:
 
 ```bash
 # Enable the site by creating a symlink.
-sudo ln -sf /etc/nginx/sites-available/nurulizyansyaza /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/ptt.nurulizyansyaza.com /etc/nginx/sites-enabled/
 
 # Remove the default server block to avoid conflicts.
 sudo rm -f /etc/nginx/sites-enabled/default
@@ -887,11 +916,12 @@ nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 nginx: configuration file /etc/nginx/nginx.conf test is successful
 ```
 
-> **Note:** Since all containers run on the same Docker network, Nginx proxies
-> directly to container names (e.g., `ptt-api-production:3000`). There is no need for
-> `proxy_ssl_server_name` or external HTTPS between Nginx and the backend services.
-> All routing is handled through subpath `location` blocks in a single server block
-> for `nurulizyansyaza.com`.
+> **Note:** Nginx listens on port 80 only. Cloudflare Tunnel terminates TLS at the
+> edge and forwards decrypted traffic to `localhost:80` via the `cloudflared` daemon.
+> Nginx uses `server_name` to distinguish between production (`ptt.nurulizyansyaza.com`)
+> and staging (`staging-ptt.nurulizyansyaza.com`) subdomains and proxies to the
+> correct containers via their localhost ports. There is no need for SSL certificates
+> or `listen 443` directives on the server.
 
 ---
 
@@ -905,13 +935,13 @@ nginx: configuration file /etc/nginx/nginx.conf test is successful
 | `HOMELAB_HOST` | your-homelab-ip |
 | `HOMELAB_SSH_KEY` | Full content of the personal-task-tracker-deploy private key |
 | `HOMELAB_USER` | SSH username on the homelab server (e.g., your-user) |
-| `STAGING_API_URL` | /staging/personal-task-tracker/api (Frontend Staging API path) |
-| `PRODUCTION_API_URL` | /personal-task-tracker/api (Frontend Production API path) |
+| `STAGING_API_URL` | /api (Frontend Staging API path) |
+| `PRODUCTION_API_URL` | /api (Frontend Production API path) |
 
-> **Note:** `STAGING_API_URL` and `PRODUCTION_API_URL` are relative subpath prefixes,
-> not full domain URLs. The CI/CD pipeline passes these values as
+> **Note:** `STAGING_API_URL` and `PRODUCTION_API_URL` are both `/api` since each
+> environment has its own subdomain. The CI/CD pipeline passes these values as
 > `NEXT_PUBLIC_API_URL` during the Docker build so that the browser makes requests to
-> the same origin using subpath routing, and Nginx handles the proxying.
+> the same subdomain origin, and Nginx handles the proxying.
 
 ### Sub-repositories (API, Frontend, Core)
 
@@ -1169,8 +1199,8 @@ Actions secret.
 
 ### UFW blocks legitimate traffic
 
-**Cause:** A UFW rule is missing or was accidentally deleted, preventing HTTP/HTTPS
-traffic from reaching Nginx.
+**Cause:** A UFW rule is missing or was accidentally deleted, preventing SSH
+traffic from reaching the server.
 
 **Fix:** Verify the firewall rules and re-add any missing ones:
 
@@ -1178,11 +1208,8 @@ traffic from reaching Nginx.
 # Check current UFW rules.
 sudo ufw status numbered
 
-# If port 443 is missing, add it back.
-sudo ufw allow 443/tcp
-
-# If port 80 is missing, add it back.
-sudo ufw allow 80/tcp
+# If port 22 is missing, add it back.
+sudo ufw allow 22/tcp
 
 # Reload the firewall.
 sudo ufw reload
@@ -1193,8 +1220,10 @@ The correct rules are:
 | Port | Protocol | Action |
 |---|---|---|
 | 22 | TCP | ALLOW |
-| 80 | TCP | ALLOW |
-| 443 | TCP | ALLOW |
+
+> **Note:** Ports 80 and 443 do not need to be open to the public internet when using
+> Cloudflare Tunnel. If web traffic is not reaching the server, check that the
+> `cloudflared` service is running: `sudo systemctl status cloudflared`.
 
 ---
 
@@ -1209,7 +1238,7 @@ internet, and domain registration. There are no cloud provider usage fees.
 | Electricity (~50W average draw) | -- | ~$5.00 – $10.00 |
 | Internet (existing home connection) | -- | $0.00 (already paying) |
 | Domain Name (.com registration) | ~$10 – $15/year | ~$1.00 |
-| Let's Encrypt SSL Certificates | -- | $0.00 (free) |
+| Cloudflare Tunnel + SSL | -- | $0.00 (free tier) |
 | GHCR Storage | -- | $0.00 (free for public repos, 500 MB free for private) |
 | Docker + Redis + MariaDB | -- | $0.00 (runs on server) |
 | Dynamic DNS (optional, e.g., DuckDNS) | -- | $0.00 (free) |
