@@ -127,7 +127,7 @@ jobs:
           docker compose -p ptt-staging -f docker-compose.frontend-staging.yml up -d
 
           # Reload host Nginx
-          sudo nginx -s reload || true
+          sudo nginx -t && sudo systemctl reload nginx || true
 
           docker image prune -f || true
           echo "Staging deployment complete!"
