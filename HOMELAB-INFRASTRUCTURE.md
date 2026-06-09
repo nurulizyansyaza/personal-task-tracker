@@ -28,7 +28,7 @@ and subdomain routing.
 The API, frontend, database, and Redis all run on a **single homelab server**. A
 **Cloudflare Tunnel** connects the server to Cloudflare's edge network, which handles
 SSL/TLS termination and routes traffic to dedicated subdomains. Host Nginx listens on
-port 8082 and uses `server_name` directives to route each subdomain to the appropriate
+port 8083 and uses `server_name` directives to route each subdomain to the appropriate
 Docker container. Application containers are never directly exposed to the internet.
 
 ```mermaid
@@ -39,10 +39,10 @@ graph TB
     end
 
     subgraph "Cloudflare Tunnel (cloudflared)"
-        TUNNEL["cloudflared → http://localhost:8082"]
+        TUNNEL["cloudflared → http://localhost:8083"]
     end
 
-    subgraph "Host Nginx Reverse Proxy (port 8082)"
+    subgraph "Host Nginx Reverse Proxy (port 8083)"
         NG_P["server_name ptt.nurulizyansyaza.com"]
         NG_S["server_name staging-ptt.nurulizyansyaza.com"]
     end
@@ -103,14 +103,14 @@ sequenceDiagram
     Note over Browser,DB: Page load
     Browser->>CF: GET https://ptt.nurulizyansyaza.com/
     CF->>Tunnel: Route via tunnel
-    Tunnel->>Nginx: http://localhost:8082
+    Tunnel->>Nginx: http://localhost:8083
     Nginx->>NextJS: proxy_pass to 127.0.0.1:3201
     NextJS-->>Browser: HTML page
 
     Note over Browser,DB: API call (same origin, proxied by Nginx)
     Browser->>CF: GET https://ptt.nurulizyansyaza.com/api/tasks
     CF->>Tunnel: Route via tunnel
-    Tunnel->>Nginx: http://localhost:8082
+    Tunnel->>Nginx: http://localhost:8083
     Nginx->>API: proxy_pass to 127.0.0.1:3200
     API->>Redis: Check cache
     Redis-->>API: Cache miss
@@ -145,7 +145,7 @@ so that `docker login` to GHCR works during deployment.
 | Frontend Production | ptt.nurulizyansyaza.com | 127.0.0.1:3201 | Cloudflare (tunnel) |
 
 > **Note:** Each environment is served on its own subdomain. Host Nginx listens on
-> port 8082 and uses `server_name` to route traffic to the correct Docker containers
+> port 8083 and uses `server_name` to route traffic to the correct Docker containers
 > via `proxy_pass` to localhost ports. Cloudflare Tunnel terminates TLS at
 > Cloudflare's edge and forwards traffic to the local Nginx over the tunnel. The
 > Nginx config file is at `/etc/nginx/sites-available/ptt.nurulizyansyaza.com`.
@@ -172,7 +172,7 @@ production, port 6380 for staging). There is no managed Redis cluster.
 
 > **Note:** Ports 80 and 443 do **not** need to be open to the public internet.
 > Cloudflare Tunnel uses an outbound connection from `cloudflared` to Cloudflare's
-> edge, so no inbound ports are required for web traffic. Nginx listens on port 8082
+> edge, so no inbound ports are required for web traffic. Nginx listens on port 8083
 > only for the local `cloudflared` daemon connecting via `localhost`.
 
 ### Container Registry
@@ -313,7 +313,7 @@ Rules updated (v6)
 
 > **Note:** Ports 80 and 443 do **not** need to be opened to the public internet.
 > Cloudflare Tunnel initiates an outbound connection from `cloudflared` to
-> Cloudflare's edge network. Nginx listens on port 8082 only for the local
+> Cloudflare's edge network. Nginx listens on port 8083 only for the local
 > `cloudflared` daemon connecting via `localhost`.
 
 ```bash
@@ -665,9 +665,9 @@ credentials-file: /root/.cloudflared/<your-tunnel-id>.json
 
 ingress:
   - hostname: ptt.nurulizyansyaza.com
-    service: http://localhost:8082
+    service: http://localhost:8083
   - hostname: staging-ptt.nurulizyansyaza.com
-    service: http://localhost:8082
+    service: http://localhost:8083
   - service: http_status:404
 EOF
 ```
@@ -688,13 +688,13 @@ sudo systemctl status cloudflared
 
 You should see `active (running)` in the output.
 
-> **Note:** Both subdomains route to `http://localhost:8082` where host Nginx listens.
+> **Note:** Both subdomains route to `http://localhost:8083` where host Nginx listens.
 > Nginx uses `server_name` to distinguish between production and staging traffic and
 > proxies to the correct containers. Cloudflare handles SSL/TLS termination at the
-> edge, so Nginx only needs to listen on port 8082.
+> edge, so Nginx only needs to listen on port 8083.
 >
 > **Note (multi-tenant servers):** Port 80 may already be in use by other services
-> (e.g., another nginx container). In that case, choose an unused port such as 8082
+> (e.g., another nginx container). In that case, choose an unused port such as 8083
 > and update both the Nginx `listen` directive and the Cloudflare Tunnel ingress
 > `service` URL to match.
 
@@ -831,10 +831,10 @@ PONG
 Host Nginx runs on the homelab server and does three things for each environment: it
 serves the Next.js application, proxies `/api/` to the API container, and proxies
 `/api/docs` to the API container. Since Cloudflare Tunnel handles TLS, Nginx listens
-on port 8082 and uses `server_name` to route between production and staging subdomains.
+on port 8083 and uses `server_name` to route between production and staging subdomains.
 
 > **Note (multi-tenant servers):** Port 80 may already be in use by other services.
-> PTT Nginx listens on port **8082** on this server. If port 80 is free, you can use
+> PTT Nginx listens on port **8083** on this server. If port 80 is free, you can use
 > `listen 80` instead and update the Cloudflare Tunnel ingress to `http://localhost:80`.
 
 Create the Nginx configuration at `/etc/nginx/sites-available/ptt.nurulizyansyaza.com`
@@ -844,7 +844,7 @@ with two server blocks for subdomain routing:
 sudo cat > /etc/nginx/sites-available/ptt.nurulizyansyaza.com << 'NGINX'
 # Production — ptt.nurulizyansyaza.com
 server {
-    listen 8082;
+    listen 8083;
     server_name ptt.nurulizyansyaza.com;
 
     # Production API — /api/
@@ -873,7 +873,7 @@ server {
 
 # Staging — staging-ptt.nurulizyansyaza.com
 server {
-    listen 8082;
+    listen 8083;
     server_name staging-ptt.nurulizyansyaza.com;
 
     # Staging API — /api/
@@ -925,7 +925,7 @@ nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 nginx: configuration file /etc/nginx/nginx.conf test is successful
 ```
 
-> **Note:** Nginx listens on port 8082 only. Cloudflare Tunnel terminates TLS at the
+> **Note:** Nginx listens on port 8083 only. Cloudflare Tunnel terminates TLS at the
 > edge and forwards decrypted traffic to `localhost:80` via the `cloudflared` daemon.
 > Nginx uses `server_name` to distinguish between production (`ptt.nurulizyansyaza.com`)
 > and staging (`staging-ptt.nurulizyansyaza.com`) subdomains and proxies to the
