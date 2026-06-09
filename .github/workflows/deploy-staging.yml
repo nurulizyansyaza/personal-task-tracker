@@ -89,6 +89,12 @@ jobs:
           curl -fsSL https://github.com/cloudflare/cloudflared/releases/download/2026.3.0/cloudflared-linux-amd64.deb -o cloudflared.deb
           sudo dpkg -i cloudflared.deb
 
+          # Fix systemd-resolved DNS issues in GitHub Actions CI:
+          # Pre-resolve via external DNS (bypasses potentially broken 127.0.0.53)
+          # and add to /etc/hosts so cloudflared can look it up reliably.
+          HOMELAB_IP=$(dig +short @1.1.1.1 ${{ secrets.STAGING_HOMELAB_HOST }} | tail -1)
+          echo "$HOMELAB_IP ${{ secrets.STAGING_HOMELAB_HOST }}" | sudo tee -a /etc/hosts
+
           # Configure SSH to use cloudflared as proxy
           mkdir -p ~/.ssh
           echo '${{ secrets.STAGING_HOMELAB_SSH_KEY }}' > ~/.ssh/deploy_key
