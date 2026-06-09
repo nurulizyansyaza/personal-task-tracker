@@ -102,7 +102,7 @@ jobs:
       - name: Setup SSH via Cloudflare Tunnel
         run: |
           # Install cloudflared
-          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/download/2026.3.0/cloudflared-linux-amd64.deb -o cloudflared.deb
           sudo dpkg -i cloudflared.deb
 
           # Configure SSH to use cloudflared as proxy
