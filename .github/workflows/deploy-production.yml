@@ -119,10 +119,16 @@ jobs:
             StrictHostKeyChecking no
           EOF
 
+      - name: Sync Docker Compose files to Homelab
+        run: |
+          ssh homelab "mkdir -p /data/nurulizyansyaza/personal-task-tracker"
+          scp docker-compose.api-production.yml docker-compose.frontend-production.yml \
+            homelab:/data/nurulizyansyaza/personal-task-tracker/
+
       - name: Deploy to Homelab
         run: |
           ssh homelab << 'DEPLOY'
-          cd ~/personal-task-tracker
+          cd /data/nurulizyansyaza/personal-task-tracker
 
           echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 

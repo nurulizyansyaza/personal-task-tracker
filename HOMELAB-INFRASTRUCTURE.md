@@ -354,8 +354,8 @@ names on the same container to keep resource usage low.
 
 ```bash
 # Create a directory for the database data and configuration.
-mkdir -p /home/your-user/personal-task-tracker/mariadb/data
-mkdir -p /home/your-user/personal-task-tracker/mariadb/conf
+mkdir -p /data/nurulizyansyaza/personal-task-tracker/mariadb/data
+mkdir -p /data/nurulizyansyaza/personal-task-tracker/mariadb/conf
 
 # Create a Docker network for database communication.
 # All containers that need database access will join this network.
@@ -377,7 +377,7 @@ docker run -d \
   --network ptt-network \
   --restart unless-stopped \
   -e MYSQL_ROOT_PASSWORD='<your-root-password>' \
-  -v /home/your-user/personal-task-tracker/mariadb/data:/var/lib/mysql \
+  -v /data/nurulizyansyaza/personal-task-tracker/mariadb/data:/var/lib/mysql \
   -p 127.0.0.1:3306:3306 \
   mariadb:10.11
 ```
@@ -480,8 +480,8 @@ they can communicate by container name.
 
 ```bash
 # Create the project directory structure.
-mkdir -p /home/your-user/personal-task-tracker
-cd /home/your-user/personal-task-tracker
+mkdir -p /data/nurulizyansyaza/personal-task-tracker
+cd /data/nurulizyansyaza/personal-task-tracker
 ```
 
 **Install Docker and Docker Compose on the homelab server:**
@@ -531,7 +531,7 @@ docker compose version
 **Create a docker-compose.yml for the production stack:**
 
 ```bash
-cat > /home/your-user/personal-task-tracker/docker-compose.yml << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/docker-compose.yml << 'EOF'
 services:
   api:
     image: ghcr.io/nurulizyansyaza/ptt-api:production
@@ -575,7 +575,7 @@ EOF
 **Create a docker-compose.staging.yml for the staging stack:**
 
 ```bash
-cat > /home/your-user/personal-task-tracker/docker-compose.staging.yml << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/docker-compose.staging.yml << 'EOF'
 services:
   api-staging:
     image: ghcr.io/nurulizyansyaza/ptt-api:staging
@@ -710,13 +710,13 @@ sudo systemctl enable nginx
 Each service needs an environment file that Docker Compose reads at startup. SSH into
 the homelab server and create each file.
 
-**API production environment** (`/home/your-user/personal-task-tracker/.env.api.production`):
+**API production environment** (`/data/nurulizyansyaza/personal-task-tracker/.env.api.production`):
 
 ```bash
 ssh -i ~/.ssh/personal-task-tracker-deploy your-user@your-homelab-ip
 
-mkdir -p /home/your-user/personal-task-tracker
-cat > /home/your-user/personal-task-tracker/.env.api.production << 'EOF'
+mkdir -p /data/nurulizyansyaza/personal-task-tracker
+cat > /data/nurulizyansyaza/personal-task-tracker/.env.api.production << 'EOF'
 DB_HOST=ptt-mariadb
 DB_USERNAME=taskuser
 DB_PASSWORD=<secure-password>
@@ -727,10 +727,10 @@ REDIS_PORT=6379
 EOF
 ```
 
-**API staging environment** (`/home/your-user/personal-task-tracker/.env.api.staging`):
+**API staging environment** (`/data/nurulizyansyaza/personal-task-tracker/.env.api.staging`):
 
 ```bash
-cat > /home/your-user/personal-task-tracker/.env.api.staging << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/.env.api.staging << 'EOF'
 DB_HOST=ptt-mariadb
 DB_USERNAME=taskuser
 DB_PASSWORD=<secure-password>
@@ -741,10 +741,10 @@ REDIS_PORT=6379
 EOF
 ```
 
-**Frontend production environment** (`/home/your-user/personal-task-tracker/.env.frontend.production`):
+**Frontend production environment** (`/data/nurulizyansyaza/personal-task-tracker/.env.frontend.production`):
 
 ```bash
-cat > /home/your-user/personal-task-tracker/.env.frontend.production << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/.env.frontend.production << 'EOF'
 NEXT_PUBLIC_API_URL=/api
 API_HOST=ptt-api-production:3000
 EOF
@@ -755,7 +755,7 @@ each environment has its own subdomain. `API_HOST` points to the staging API
 container.
 
 ```bash
-cat > /home/your-user/personal-task-tracker/.env.frontend.staging << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/.env.frontend.staging << 'EOF'
 NEXT_PUBLIC_API_URL=/api
 API_HOST=ptt-api-staging:3000
 EOF
@@ -784,7 +784,7 @@ them and verify they are running:
 
 ```bash
 # Start the production Redis container.
-cd /home/your-user/personal-task-tracker
+cd /data/nurulizyansyaza/personal-task-tracker
 docker compose up -d redis
 
 # Verify Redis is running.
@@ -1056,7 +1056,7 @@ manually:
 ssh -i ~/.ssh/personal-task-tracker-deploy your-user@your-homelab-ip
 
 # Navigate to the project directory.
-cd /home/your-user/personal-task-tracker
+cd /data/nurulizyansyaza/personal-task-tracker
 
 # Log in to GHCR.
 echo '<your-ghcr-token>' | docker login ghcr.io \
@@ -1109,7 +1109,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 docker logs ptt-api-production --tail 50
 
 # If the container is stopped, restart it.
-cd /home/your-user/personal-task-tracker
+cd /data/nurulizyansyaza/personal-task-tracker
 docker compose up -d
 ```
 
@@ -1166,7 +1166,7 @@ docker inspect ptt-mariadb \
   --format '{{range $net, $conf := .NetworkSettings.Networks}}{{$net}} {{end}}'
 
 # Verify the DB_HOST value matches the MariaDB container name.
-grep DB_HOST /home/your-user/personal-task-tracker/.env.api.production
+grep DB_HOST /data/nurulizyansyaza/personal-task-tracker/.env.api.production
 
 # Test the connection from the API container.
 docker exec ptt-api-production sh -c \
@@ -1254,7 +1254,7 @@ and the domain name.
 > consumption on the homelab server:
 > ```bash
 > # Stop the staging containers to free resources.
-> cd /home/your-user/personal-task-tracker
+> cd /data/nurulizyansyaza/personal-task-tracker
 > docker compose -f docker-compose.staging.yml down
 >
 > # Start them again when needed.
