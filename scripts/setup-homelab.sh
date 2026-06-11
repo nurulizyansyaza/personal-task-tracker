@@ -64,14 +64,15 @@ setup_firewall() {
 
 setup_project_directory() {
   echo "Setting up project directory..."
-  mkdir -p ~/personal-task-tracker/nginx
-  cd ~/personal-task-tracker
+  sudo mkdir -p /data/nurulizyansyaza/personal-task-tracker/nginx
+  sudo chown -R "$USER":"$USER" /data/nurulizyansyaza/personal-task-tracker
+  cd /data/nurulizyansyaza/personal-task-tracker
 }
 
 print_next_steps() {
   echo ""
   echo "Setup complete. Next steps:"
-  echo "1. Copy docker-compose and nginx configs to ~/personal-task-tracker/"
+  echo "1. Copy docker-compose and nginx configs to /data/nurulizyansyaza/personal-task-tracker/"
   echo "2. Create .env file with your environment variables"
   echo "3. Login to GHCR: echo <token> | docker login ghcr.io -u <username> --password-stdin"
   echo "4. Log out and log back in for Docker group to take effect"

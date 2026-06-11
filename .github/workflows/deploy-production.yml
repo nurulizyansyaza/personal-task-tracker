@@ -102,8 +102,14 @@ jobs:
       - name: Setup SSH via Cloudflare Tunnel
         run: |
           # Install cloudflared
-          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/download/2026.3.0/cloudflared-linux-amd64.deb -o cloudflared.deb
           sudo dpkg -i cloudflared.deb
+
+          # Fix systemd-resolved DNS issues in GitHub Actions CI:
+          # Pre-resolve via external DNS (bypasses potentially broken 127.0.0.53)
+          # and add to /etc/hosts so cloudflared can look it up reliably.
+          HOMELAB_IP=$(dig +short @1.1.1.1 ${{ secrets.PRODUCTION_HOMELAB_HOST }} | tail -1)
+          echo "$HOMELAB_IP ${{ secrets.PRODUCTION_HOMELAB_HOST }}" | sudo tee -a /etc/hosts
 
           # Configure SSH to use cloudflared as proxy
           mkdir -p ~/.ssh
@@ -119,10 +125,16 @@ jobs:
             StrictHostKeyChecking no
           EOF
 
+      - name: Sync Docker Compose files to Homelab
+        run: |
+          ssh homelab "mkdir -p /data/nurulizyansyaza/personal-task-tracker"
+          scp docker-compose.api-production.yml docker-compose.frontend-production.yml \
+            homelab:/data/nurulizyansyaza/personal-task-tracker/
+
       - name: Deploy to Homelab
         run: |
           ssh homelab << 'DEPLOY'
-          cd ~/personal-task-tracker
+          cd /data/nurulizyansyaza/personal-task-tracker
 
           echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -137,7 +149,7 @@ jobs:
           docker compose -p ptt-production -f docker-compose.frontend-production.yml up -d
 
           # Reload host Nginx
-          sudo nginx -s reload || true
+          sudo nginx -t && sudo systemctl reload nginx || true
 
           docker image prune -f || true
           echo "Production deployment complete!"

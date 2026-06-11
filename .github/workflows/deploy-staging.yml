@@ -86,8 +86,21 @@ jobs:
       - name: Setup SSH via Cloudflare Tunnel
         run: |
           # Install cloudflared
-          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/download/2026.3.0/cloudflared-linux-amd64.deb -o cloudflared.deb
           sudo dpkg -i cloudflared.deb
+
+          # Fix systemd-resolved DNS issues in GitHub Actions CI:
+          # The runner's local stub resolver (127.0.0.53) returns NXDOMAIN for the
+          # homelab hostname even though public resolvers answer it correctly, which
+          # breaks cloudflared's hostname lookup. Point the system resolver directly
+          # at Cloudflare/Google DNS so cloudflared (and ssh) resolve the host.
+          sudo systemctl stop systemd-resolved 2>/dev/null || true
+          sudo rm -f /etc/resolv.conf
+          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf
+
+          # Belt-and-suspenders: also pin the resolved IP in /etc/hosts.
+          HOMELAB_IP=$(dig +short @1.1.1.1 ${{ secrets.STAGING_HOMELAB_HOST }} | tail -1)
+          echo "$HOMELAB_IP ${{ secrets.STAGING_HOMELAB_HOST }}" | sudo tee -a /etc/hosts
 
           # Configure SSH to use cloudflared as proxy
           mkdir -p ~/.ssh
@@ -103,10 +116,16 @@ jobs:
             StrictHostKeyChecking no
           EOF
 
+      - name: Sync Docker Compose files to Homelab
+        run: |
+          ssh homelab "mkdir -p /data/nurulizyansyaza/personal-task-tracker"
+          scp docker-compose.api-staging.yml docker-compose.frontend-staging.yml \
+            homelab:/data/nurulizyansyaza/personal-task-tracker/
+
       - name: Deploy to Homelab
         run: |
           ssh homelab << 'DEPLOY'
-          cd ~/personal-task-tracker
+          cd /data/nurulizyansyaza/personal-task-tracker
 
           echo ${{ secrets.GHCR_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
@@ -121,7 +140,7 @@ jobs:
           docker compose -p ptt-staging -f docker-compose.frontend-staging.yml up -d
 
           # Reload host Nginx
-          sudo nginx -s reload || true
+          sudo nginx -t && sudo systemctl reload nginx || true
 
           docker image prune -f || true
           echo "Staging deployment complete!"

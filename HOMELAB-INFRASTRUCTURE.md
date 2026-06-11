@@ -28,7 +28,7 @@ and subdomain routing.
 The API, frontend, database, and Redis all run on a **single homelab server**. A
 **Cloudflare Tunnel** connects the server to Cloudflare's edge network, which handles
 SSL/TLS termination and routes traffic to dedicated subdomains. Host Nginx listens on
-port 80 and uses `server_name` directives to route each subdomain to the appropriate
+port 8083 and uses `server_name` directives to route each subdomain to the appropriate
 Docker container. Application containers are never directly exposed to the internet.
 
 ```mermaid
@@ -39,10 +39,10 @@ graph TB
     end
 
     subgraph "Cloudflare Tunnel (cloudflared)"
-        TUNNEL["cloudflared → http://localhost:80"]
+        TUNNEL["cloudflared → http://localhost:8083"]
     end
 
-    subgraph "Host Nginx Reverse Proxy (port 80)"
+    subgraph "Host Nginx Reverse Proxy (port 8083)"
         NG_P["server_name ptt.nurulizyansyaza.com"]
         NG_S["server_name staging-ptt.nurulizyansyaza.com"]
     end
@@ -103,14 +103,14 @@ sequenceDiagram
     Note over Browser,DB: Page load
     Browser->>CF: GET https://ptt.nurulizyansyaza.com/
     CF->>Tunnel: Route via tunnel
-    Tunnel->>Nginx: http://localhost:80
+    Tunnel->>Nginx: http://localhost:8083
     Nginx->>NextJS: proxy_pass to 127.0.0.1:3201
     NextJS-->>Browser: HTML page
 
     Note over Browser,DB: API call (same origin, proxied by Nginx)
-    Browser->>CF: GET https://ptt.nurulizyansyaza.com/tasks
+    Browser->>CF: GET https://ptt.nurulizyansyaza.com/api/tasks
     CF->>Tunnel: Route via tunnel
-    Tunnel->>Nginx: http://localhost:80
+    Tunnel->>Nginx: http://localhost:8083
     Nginx->>API: proxy_pass to 127.0.0.1:3200
     API->>Redis: Check cache
     Redis-->>API: Cache miss
@@ -145,7 +145,7 @@ so that `docker login` to GHCR works during deployment.
 | Frontend Production | ptt.nurulizyansyaza.com | 127.0.0.1:3201 | Cloudflare (tunnel) |
 
 > **Note:** Each environment is served on its own subdomain. Host Nginx listens on
-> port 80 and uses `server_name` to route traffic to the correct Docker containers
+> port 8083 and uses `server_name` to route traffic to the correct Docker containers
 > via `proxy_pass` to localhost ports. Cloudflare Tunnel terminates TLS at
 > Cloudflare's edge and forwards traffic to the local Nginx over the tunnel. The
 > Nginx config file is at `/etc/nginx/sites-available/ptt.nurulizyansyaza.com`.
@@ -172,7 +172,7 @@ production, port 6380 for staging). There is no managed Redis cluster.
 
 > **Note:** Ports 80 and 443 do **not** need to be open to the public internet.
 > Cloudflare Tunnel uses an outbound connection from `cloudflared` to Cloudflare's
-> edge, so no inbound ports are required for web traffic. Nginx listens on port 80
+> edge, so no inbound ports are required for web traffic. Nginx listens on port 8083
 > only for the local `cloudflared` daemon connecting via `localhost`.
 
 ### Container Registry
@@ -313,7 +313,7 @@ Rules updated (v6)
 
 > **Note:** Ports 80 and 443 do **not** need to be opened to the public internet.
 > Cloudflare Tunnel initiates an outbound connection from `cloudflared` to
-> Cloudflare's edge network. Nginx listens on port 80 only for the local
+> Cloudflare's edge network. Nginx listens on port 8083 only for the local
 > `cloudflared` daemon connecting via `localhost`.
 
 ```bash
@@ -354,8 +354,8 @@ names on the same container to keep resource usage low.
 
 ```bash
 # Create a directory for the database data and configuration.
-mkdir -p /home/your-user/personal-task-tracker/mariadb/data
-mkdir -p /home/your-user/personal-task-tracker/mariadb/conf
+mkdir -p /data/nurulizyansyaza/personal-task-tracker/mariadb/data
+mkdir -p /data/nurulizyansyaza/personal-task-tracker/mariadb/conf
 
 # Create a Docker network for database communication.
 # All containers that need database access will join this network.
@@ -377,7 +377,7 @@ docker run -d \
   --network ptt-network \
   --restart unless-stopped \
   -e MYSQL_ROOT_PASSWORD='<your-root-password>' \
-  -v /home/your-user/personal-task-tracker/mariadb/data:/var/lib/mysql \
+  -v /data/nurulizyansyaza/personal-task-tracker/mariadb/data:/var/lib/mysql \
   -p 127.0.0.1:3306:3306 \
   mariadb:10.11
 ```
@@ -480,8 +480,8 @@ they can communicate by container name.
 
 ```bash
 # Create the project directory structure.
-mkdir -p /home/your-user/personal-task-tracker
-cd /home/your-user/personal-task-tracker
+mkdir -p /data/nurulizyansyaza/personal-task-tracker
+cd /data/nurulizyansyaza/personal-task-tracker
 ```
 
 **Install Docker and Docker Compose on the homelab server:**
@@ -531,7 +531,7 @@ docker compose version
 **Create a docker-compose.yml for the production stack:**
 
 ```bash
-cat > /home/your-user/personal-task-tracker/docker-compose.yml << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/docker-compose.yml << 'EOF'
 services:
   api:
     image: ghcr.io/nurulizyansyaza/ptt-api:production
@@ -575,7 +575,7 @@ EOF
 **Create a docker-compose.staging.yml for the staging stack:**
 
 ```bash
-cat > /home/your-user/personal-task-tracker/docker-compose.staging.yml << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/docker-compose.staging.yml << 'EOF'
 services:
   api-staging:
     image: ghcr.io/nurulizyansyaza/ptt-api:staging
@@ -665,9 +665,9 @@ credentials-file: /root/.cloudflared/<your-tunnel-id>.json
 
 ingress:
   - hostname: ptt.nurulizyansyaza.com
-    service: http://localhost:80
+    service: http://localhost:8083
   - hostname: staging-ptt.nurulizyansyaza.com
-    service: http://localhost:80
+    service: http://localhost:8083
   - service: http_status:404
 EOF
 ```
@@ -688,10 +688,15 @@ sudo systemctl status cloudflared
 
 You should see `active (running)` in the output.
 
-> **Note:** Both subdomains route to `http://localhost:80` where host Nginx listens.
+> **Note:** Both subdomains route to `http://localhost:8083` where host Nginx listens.
 > Nginx uses `server_name` to distinguish between production and staging traffic and
 > proxies to the correct containers. Cloudflare handles SSL/TLS termination at the
-> edge, so Nginx only needs to listen on port 80.
+> edge, so Nginx only needs to listen on port 8083.
+>
+> **Note (multi-tenant servers):** Port 80 may already be in use by other services
+> (e.g., another nginx container). In that case, choose an unused port such as 8083
+> and update both the Nginx `listen` directive and the Cloudflare Tunnel ingress
+> `service` URL to match.
 
 **Install Nginx on the host:**
 
@@ -710,13 +715,13 @@ sudo systemctl enable nginx
 Each service needs an environment file that Docker Compose reads at startup. SSH into
 the homelab server and create each file.
 
-**API production environment** (`/home/your-user/personal-task-tracker/.env.api.production`):
+**API production environment** (`/data/nurulizyansyaza/personal-task-tracker/.env.api.production`):
 
 ```bash
 ssh -i ~/.ssh/personal-task-tracker-deploy your-user@your-homelab-ip
 
-mkdir -p /home/your-user/personal-task-tracker
-cat > /home/your-user/personal-task-tracker/.env.api.production << 'EOF'
+mkdir -p /data/nurulizyansyaza/personal-task-tracker
+cat > /data/nurulizyansyaza/personal-task-tracker/.env.api.production << 'EOF'
 DB_HOST=ptt-mariadb
 DB_USERNAME=taskuser
 DB_PASSWORD=<secure-password>
@@ -727,10 +732,10 @@ REDIS_PORT=6379
 EOF
 ```
 
-**API staging environment** (`/home/your-user/personal-task-tracker/.env.api.staging`):
+**API staging environment** (`/data/nurulizyansyaza/personal-task-tracker/.env.api.staging`):
 
 ```bash
-cat > /home/your-user/personal-task-tracker/.env.api.staging << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/.env.api.staging << 'EOF'
 DB_HOST=ptt-mariadb
 DB_USERNAME=taskuser
 DB_PASSWORD=<secure-password>
@@ -741,10 +746,10 @@ REDIS_PORT=6379
 EOF
 ```
 
-**Frontend production environment** (`/home/your-user/personal-task-tracker/.env.frontend.production`):
+**Frontend production environment** (`/data/nurulizyansyaza/personal-task-tracker/.env.frontend.production`):
 
 ```bash
-cat > /home/your-user/personal-task-tracker/.env.frontend.production << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/.env.frontend.production << 'EOF'
 NEXT_PUBLIC_API_URL=/api
 API_HOST=ptt-api-production:3000
 EOF
@@ -755,7 +760,7 @@ each environment has its own subdomain. `API_HOST` points to the staging API
 container.
 
 ```bash
-cat > /home/your-user/personal-task-tracker/.env.frontend.staging << 'EOF'
+cat > /data/nurulizyansyaza/personal-task-tracker/.env.frontend.staging << 'EOF'
 NEXT_PUBLIC_API_URL=/api
 API_HOST=ptt-api-staging:3000
 EOF
@@ -784,7 +789,7 @@ them and verify they are running:
 
 ```bash
 # Start the production Redis container.
-cd /home/your-user/personal-task-tracker
+cd /data/nurulizyansyaza/personal-task-tracker
 docker compose up -d redis
 
 # Verify Redis is running.
@@ -824,9 +829,13 @@ PONG
 ### Step 9 -- Configure Nginx Reverse Proxy
 
 Host Nginx runs on the homelab server and does three things for each environment: it
-serves the Next.js application, proxies `/tasks` to the API container, and proxies
+serves the Next.js application, proxies `/api/` to the API container, and proxies
 `/api/docs` to the API container. Since Cloudflare Tunnel handles TLS, Nginx listens
-on port 80 and uses `server_name` to route between production and staging subdomains.
+on port 8083 and uses `server_name` to route between production and staging subdomains.
+
+> **Note (multi-tenant servers):** Port 80 may already be in use by other services.
+> PTT Nginx listens on port **8083** on this server. If port 80 is free, you can use
+> `listen 80` instead and update the Cloudflare Tunnel ingress to `http://localhost:80`.
 
 Create the Nginx configuration at `/etc/nginx/sites-available/ptt.nurulizyansyaza.com`
 with two server blocks for subdomain routing:
@@ -835,7 +844,7 @@ with two server blocks for subdomain routing:
 sudo cat > /etc/nginx/sites-available/ptt.nurulizyansyaza.com << 'NGINX'
 # Production — ptt.nurulizyansyaza.com
 server {
-    listen 80;
+    listen 8083;
     server_name ptt.nurulizyansyaza.com;
 
     # Production API — /api/
@@ -864,7 +873,7 @@ server {
 
 # Staging — staging-ptt.nurulizyansyaza.com
 server {
-    listen 80;
+    listen 8083;
     server_name staging-ptt.nurulizyansyaza.com;
 
     # Staging API — /api/
@@ -916,7 +925,7 @@ nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
 nginx: configuration file /etc/nginx/nginx.conf test is successful
 ```
 
-> **Note:** Nginx listens on port 80 only. Cloudflare Tunnel terminates TLS at the
+> **Note:** Nginx listens on port 8083 only. Cloudflare Tunnel terminates TLS at the
 > edge and forwards decrypted traffic to `localhost:80` via the `cloudflared` daemon.
 > Nginx uses `server_name` to distinguish between production (`ptt.nurulizyansyaza.com`)
 > and staging (`staging-ptt.nurulizyansyaza.com`) subdomains and proxies to the
@@ -1056,7 +1065,7 @@ manually:
 ssh -i ~/.ssh/personal-task-tracker-deploy your-user@your-homelab-ip
 
 # Navigate to the project directory.
-cd /home/your-user/personal-task-tracker
+cd /data/nurulizyansyaza/personal-task-tracker
 
 # Log in to GHCR.
 echo '<your-ghcr-token>' | docker login ghcr.io \
@@ -1109,7 +1118,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 docker logs ptt-api-production --tail 50
 
 # If the container is stopped, restart it.
-cd /home/your-user/personal-task-tracker
+cd /data/nurulizyansyaza/personal-task-tracker
 docker compose up -d
 ```
 
@@ -1166,7 +1175,7 @@ docker inspect ptt-mariadb \
   --format '{{range $net, $conf := .NetworkSettings.Networks}}{{$net}} {{end}}'
 
 # Verify the DB_HOST value matches the MariaDB container name.
-grep DB_HOST /home/your-user/personal-task-tracker/.env.api.production
+grep DB_HOST /data/nurulizyansyaza/personal-task-tracker/.env.api.production
 
 # Test the connection from the API container.
 docker exec ptt-api-production sh -c \
@@ -1254,7 +1263,7 @@ and the domain name.
 > consumption on the homelab server:
 > ```bash
 > # Stop the staging containers to free resources.
-> cd /home/your-user/personal-task-tracker
+> cd /data/nurulizyansyaza/personal-task-tracker
 > docker compose -f docker-compose.staging.yml down
 >
 > # Start them again when needed.
