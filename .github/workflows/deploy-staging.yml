@@ -90,8 +90,15 @@ jobs:
           sudo dpkg -i cloudflared.deb
 
           # Fix systemd-resolved DNS issues in GitHub Actions CI:
-          # Pre-resolve via external DNS (bypasses potentially broken 127.0.0.53)
-          # and add to /etc/hosts so cloudflared can look it up reliably.
+          # The runner's local stub resolver (127.0.0.53) returns NXDOMAIN for the
+          # homelab hostname even though public resolvers answer it correctly, which
+          # breaks cloudflared's hostname lookup. Point the system resolver directly
+          # at Cloudflare/Google DNS so cloudflared (and ssh) resolve the host.
+          sudo systemctl stop systemd-resolved 2>/dev/null || true
+          sudo rm -f /etc/resolv.conf
+          printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf
+
+          # Belt-and-suspenders: also pin the resolved IP in /etc/hosts.
           HOMELAB_IP=$(dig +short @1.1.1.1 ${{ secrets.STAGING_HOMELAB_HOST }} | tail -1)
           echo "$HOMELAB_IP ${{ secrets.STAGING_HOMELAB_HOST }}" | sudo tee -a /etc/hosts
 
